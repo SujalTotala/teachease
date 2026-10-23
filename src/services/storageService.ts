@@ -16,6 +16,8 @@ export interface UserProfile {
   voiceSampleUrl?: string;
   faceDescriptor?: number[];
   geminiApiKey?: string;
+  preferredModel?: string;
+  autoFallbackEnabled?: boolean;
 }
 
 export interface AttendanceRecord {
@@ -238,6 +240,43 @@ class StorageService {
     const user = this.getUsers().find(u => u.uid === teacherId);
     if (user) {
       delete user.geminiApiKey;
+      this.saveUser(user);
+    }
+  }
+
+  // Teacher AI Model Preferences & Resiliency
+  public getTeacherModel(teacherId: string): string {
+    const sessionModel = sessionStorage.getItem(`teachease_model_${teacherId}`);
+    if (sessionModel) return sessionModel;
+    const localModel = localStorage.getItem(`teachease_model_${teacherId}`);
+    if (localModel) return localModel;
+    const teacher = this.getUsers().find(u => u.uid === teacherId);
+    return teacher?.preferredModel || "gemini-2.5-flash";
+  }
+
+  public setTeacherModel(teacherId: string, model: string, remember: boolean = true) {
+    sessionStorage.setItem(`teachease_model_${teacherId}`, model);
+    if (remember) {
+      localStorage.setItem(`teachease_model_${teacherId}`, model);
+    }
+    const user = this.getUsers().find(u => u.uid === teacherId);
+    if (user) {
+      user.preferredModel = model;
+      this.saveUser(user);
+    }
+  }
+
+  public getTeacherAutoFallback(teacherId: string): boolean {
+    const val = localStorage.getItem(`teachease_fallback_${teacherId}`);
+    if (val !== null) return val === "true";
+    return true; // enabled by default for resilient 502 recovery
+  }
+
+  public setTeacherAutoFallback(teacherId: string, enabled: boolean) {
+    localStorage.setItem(`teachease_fallback_${teacherId}`, String(enabled));
+    const user = this.getUsers().find(u => u.uid === teacherId);
+    if (user) {
+      user.autoFallbackEnabled = enabled;
       this.saveUser(user);
     }
   }
