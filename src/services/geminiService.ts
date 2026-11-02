@@ -10,10 +10,10 @@ export interface AIModelOption {
 
 export const AVAILABLE_MODELS: AIModelOption[] = [
   {
-    id: "gemini-2.5-flash",
-    name: "Gemini 2.5 Flash",
+    id: "gemini-3.8-flash",
+    name: "Gemini 3.8 Flash",
     badge: "Recommended",
-    description: "Built-in reasoning, high-yield academic output, balanced speed."
+    description: "Google's latest flagship Flash model. Ultra-fast, built-in reasoning, and highest academic yield."
   },
   {
     id: "gemini-2.0-flash",
@@ -32,6 +32,12 @@ export const AVAILABLE_MODELS: AIModelOption[] = [
     name: "Gemini 1.5 Pro",
     badge: "Deep Reasoning",
     description: "Complex curricula, in-depth academic rubrics, and detailed derivations."
+  },
+  {
+    id: "gemini-2.5-flash",
+    name: "Gemini 2.5 Flash",
+    badge: "Legacy",
+    description: "Earlier generation Flash model (retired by Google for new users)."
   }
 ];
 
@@ -137,13 +143,19 @@ export const executeGeminiPrompt = async (
     throw new Error("Gemini API Key is not set. Please configure your API key in AI Settings (BYOK).");
   }
 
-  const teacherPreferredModel = options.preferredModel || (teacherId ? storage.getTeacherModel(teacherId) : "gemini-2.5-flash");
+  let teacherPreferredModel = options.preferredModel || (teacherId ? storage.getTeacherModel(teacherId) : "gemini-3.8-flash");
+  if (teacherPreferredModel === "gemini-2.5-flash") {
+    teacherPreferredModel = "gemini-3.8-flash";
+    if (teacherId) {
+      storage.setTeacherModel(teacherId, "gemini-3.8-flash", true);
+    }
+  }
   const autoFallback = teacherId ? storage.getTeacherAutoFallback(teacherId) : true;
 
   // Build model cascade list
   const modelsToTry: string[] = [teacherPreferredModel];
   if (autoFallback) {
-    const candidates = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+    const candidates = ["gemini-3.8-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
     for (const c of candidates) {
       if (!modelsToTry.includes(c)) {
         modelsToTry.push(c);
@@ -228,10 +240,15 @@ export const executeGeminiPrompt = async (
 
   // Format a clear and actionable error message
   const rawMsg = lastError?.message || String(lastError || "Unknown generation error");
+  if (rawMsg.includes("is no longer available to new users") || rawMsg.includes("gemini-2.5-flash")) {
+    throw new Error(
+      `Google Gemini Model Notice: The legacy gemini-2.5-flash model is no longer available to new users. Please use Gemini 3.8 Flash in AI Settings.`
+    );
+  }
   if (isTransientOrGatewayError(lastError)) {
     throw new Error(
       `Google Gemini Gateway (502 Bad Gateway): Google's model servers are temporarily experiencing high traffic or upstream gateway timeout. ` +
-      `We attempted automatic retries and model fallbacks. Please try again in a few moments, or select Gemini 2.0 Flash in AI Settings.`
+      `We attempted automatic retries and model fallbacks. Please try again in a few moments, or select Gemini 3.8 Flash or Gemini 2.0 Flash in AI Settings.`
     );
   }
 
@@ -245,15 +262,16 @@ export const executeGeminiPrompt = async (
  */
 export const testGeminiApiKey = async (
   apiKey: string,
-  preferredModel: string = "gemini-2.5-flash"
+  preferredModel: string = "gemini-3.8-flash"
 ): Promise<{ valid: boolean; message: string; modelUsed?: string }> => {
   const cleanKey = apiKey ? apiKey.trim().replace(/^['"]|['"]$/g, "") : "";
   if (!cleanKey) {
     return { valid: false, message: "API key cannot be empty." };
   }
 
+  const normalizedPreferred = preferredModel === "gemini-2.5-flash" ? "gemini-3.8-flash" : preferredModel;
   const client = new GoogleGenAI({ apiKey: cleanKey });
-  const modelsToTry = [preferredModel, "gemini-2.0-flash", "gemini-1.5-flash"].filter(
+  const modelsToTry = [normalizedPreferred, "gemini-3.8-flash", "gemini-2.0-flash", "gemini-1.5-flash"].filter(
     (m, idx, arr) => arr.indexOf(m) === idx
   );
 
@@ -271,12 +289,12 @@ export const testGeminiApiKey = async (
       });
 
       if (response && response.text) {
-        const isFallback = model !== preferredModel;
+        const isFallback = model !== normalizedPreferred;
         return {
           valid: true,
           modelUsed: model,
           message: isFallback
-            ? `API Key validated successfully! (Verified via fallback model: ${model} as ${preferredModel} had gateway traffic).`
+            ? `API Key validated successfully! (Verified via fallback model: ${model} as ${normalizedPreferred} had gateway traffic).`
             : `API Key validated successfully! Connected to Google Gemini (${model}).`
         };
       }
@@ -298,10 +316,8 @@ export const testGeminiApiKey = async (
         };
       }
 
-      // If transient 502, continue loop to try fallback model
-      if (isTransientOrGatewayError(error)) {
-        continue;
-      }
+      // For retired models (404) or transient 502/503/504, continue to next model
+      continue;
     }
   }
 

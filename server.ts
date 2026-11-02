@@ -26,14 +26,15 @@ async function startServer() {
   // Solves browser-level 502 Bad Gateway / firewall proxy / CORS issues
   app.post("/api/ai/generate", async (req, res) => {
     try {
-      const { apiKey, prompt, model = "gemini-2.5-flash", config } = req.body;
+      const { apiKey, prompt, model = "gemini-3.8-flash", config } = req.body;
       const key = (apiKey || process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim().replace(/^['"]|['"]$/g, "");
 
       if (!key) {
         return res.status(400).json({ error: "Gemini API key is required." });
       }
 
-      const modelsToTry = [model, "gemini-2.0-flash", "gemini-1.5-flash"].filter(
+      const requestedModel = (model === "gemini-2.5-flash" || !model) ? "gemini-3.8-flash" : model;
+      const modelsToTry = [requestedModel, "gemini-3.8-flash", "gemini-2.0-flash", "gemini-1.5-flash"].filter(
         (m, idx, arr) => arr.indexOf(m) === idx
       );
 
@@ -57,21 +58,14 @@ async function startServer() {
         } catch (err: any) {
           lastError = err;
           const msg = (err?.message || String(err)).toLowerCase();
-          const isTransient =
-            msg.includes("502") ||
-            msg.includes("bad gateway") ||
-            msg.includes("503") ||
-            msg.includes("504") ||
-            err?.status === 502;
 
           // If auth issue, stop immediately
-          if (msg.includes("api_key_invalid") || msg.includes("400") || msg.includes("403")) {
+          if (msg.includes("api_key_invalid") || msg.includes("400") || msg.includes("401") || msg.includes("403")) {
             return res.status(400).json({ error: "Invalid API key or unauthorized." });
           }
 
-          if (!isTransient) {
-            break;
-          }
+          // Otherwise (e.g. 404 retired model, 502/503/504 gateway timeout, or rate-limits), continue to fallback model
+          continue;
         }
       }
 
@@ -87,14 +81,15 @@ async function startServer() {
   // AI Key Test Proxy
   app.post("/api/ai/test", async (req, res) => {
     try {
-      const { apiKey, model = "gemini-2.5-flash" } = req.body;
+      const { apiKey, model = "gemini-3.8-flash" } = req.body;
       const key = (apiKey || process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim().replace(/^['"]|['"]$/g, "");
 
       if (!key) {
         return res.status(400).json({ valid: false, message: "API key is required." });
       }
 
-      const modelsToTry = [model, "gemini-2.0-flash", "gemini-1.5-flash"].filter(
+      const requestedModel = (model === "gemini-2.5-flash" || !model) ? "gemini-3.8-flash" : model;
+      const modelsToTry = [requestedModel, "gemini-3.8-flash", "gemini-2.0-flash", "gemini-1.5-flash"].filter(
         (m, idx, arr) => arr.indexOf(m) === idx
       );
 
@@ -119,9 +114,11 @@ async function startServer() {
         } catch (err: any) {
           lastError = err;
           const msg = (err?.message || String(err)).toLowerCase();
-          if (msg.includes("api_key_invalid") || msg.includes("400") || msg.includes("403")) {
+          if (msg.includes("api_key_invalid") || msg.includes("400") || msg.includes("401") || msg.includes("403")) {
             return res.status(200).json({ valid: false, message: "Invalid API key or unauthorized." });
           }
+          // Continue to fallback model on 404 or transient error
+          continue;
         }
       }
 

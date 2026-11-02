@@ -32,7 +32,7 @@ export const AISettingsModal: React.FC<AISettingsModalProps> = ({
   onKeyUpdated
 }) => {
   const [apiKey, setApiKey] = useState("");
-  const [selectedModel, setSelectedModel] = useState("gemini-2.5-flash");
+  const [selectedModel, setSelectedModel] = useState("gemini-3.8-flash");
   const [autoFallback, setAutoFallback] = useState(true);
   const [showKey, setShowKey] = useState(false);
   const [rememberKey, setRememberKey] = useState(true);
@@ -46,7 +46,7 @@ export const AISettingsModal: React.FC<AISettingsModalProps> = ({
       const model = storage.getTeacherModel(teacherId);
       const fallback = storage.getTeacherAutoFallback(teacherId);
       setApiKey(existing || "");
-      setSelectedModel(model || "gemini-2.5-flash");
+      setSelectedModel(model === "gemini-2.5-flash" ? "gemini-3.8-flash" : (model || "gemini-3.8-flash"));
       setAutoFallback(fallback);
       setTestResult(null);
       setSaveSuccess(false);
@@ -238,7 +238,7 @@ export const AISettingsModal: React.FC<AISettingsModalProps> = ({
                       <span className="font-semibold text-xs text-white">{m.name}</span>
                       <span
                         className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
-                          m.id === "gemini-2.5-flash"
+                          m.id === "gemini-3.8-flash"
                             ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30"
                             : m.id === "gemini-2.0-flash"
                             ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
@@ -300,7 +300,7 @@ export const AISettingsModal: React.FC<AISettingsModalProps> = ({
                   <p className="opacity-90 mt-0.5 leading-relaxed">{testResult.message}</p>
                   {!testResult.valid && testResult.message.includes("502") && (
                     <div className="mt-2 pt-2 border-t border-rose-500/20 text-[11px] text-rose-200">
-                      <strong>How to solve:</strong> Click on <span className="font-bold underline cursor-pointer" onClick={() => setSelectedModel("gemini-2.0-flash")}>Gemini 2.0 Flash</span> or <span className="font-bold underline cursor-pointer" onClick={() => setSelectedModel("gemini-1.5-flash")}>Gemini 1.5 Flash</span> above and test again.
+                      <strong>How to solve:</strong> Click on <span className="font-bold underline cursor-pointer" onClick={() => setSelectedModel("gemini-3.8-flash")}>Gemini 3.8 Flash</span> or <span className="font-bold underline cursor-pointer" onClick={() => setSelectedModel("gemini-2.0-flash")}>Gemini 2.0 Flash</span> above and test again.
                     </div>
                   )}
                 </div>

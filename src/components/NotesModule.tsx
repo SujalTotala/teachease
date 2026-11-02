@@ -82,9 +82,13 @@ export const NotesModule: React.FC<NotesModuleProps> = ({ user }) => {
       const msg = err?.message || String(err);
       if (msg.includes("Gemini API Key") || msg.includes("API key")) {
         setApiKeyError("Your Gemini API Key is missing or invalid. Please configure it in AI Settings (BYOK).");
+      } else if (msg.includes("gemini-2.5-flash") || msg.includes("no longer available")) {
+        setApiKeyError(
+          "Model Update: The legacy gemini-2.5-flash model has been retired for new users. Switch to Gemini 3.8 Flash to proceed."
+        );
       } else if (msg.includes("502") || msg.includes("Bad Gateway") || msg.includes("Gateway")) {
         setApiKeyError(
-          "Google Gemini Gateway (502 Bad Gateway): Google's model servers are temporarily experiencing high traffic or upstream gateway timeout. You can switch to Gemini 2.0 Flash or retry."
+          "Google Gemini Gateway (502 Bad Gateway): Google's model servers are temporarily experiencing high traffic or upstream gateway timeout. You can switch models or retry."
         );
       } else {
         setApiKeyError(`Generation error: ${msg}`);
@@ -172,15 +176,32 @@ export const NotesModule: React.FC<NotesModuleProps> = ({ user }) => {
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-            {apiKeyError.includes("502") || apiKeyError.includes("Gateway") ? (
+            {apiKeyError.includes("gemini-2.5-flash") || apiKeyError.includes("no longer available") || apiKeyError.includes("Model Update") ? (
+              <button
+                onClick={() => handleSwitchModelAndRetry("gemini-3.8-flash")}
+                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 transition-colors shadow-sm"
+                title="Switch to Gemini 3.8 Flash and retry immediately"
+              >
+                <Sparkles size={13} />
+                Switch to 3.8 Flash & Retry
+              </button>
+            ) : apiKeyError.includes("502") || apiKeyError.includes("Gateway") ? (
               <>
+                <button
+                  onClick={() => handleSwitchModelAndRetry("gemini-3.8-flash")}
+                  className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 transition-colors shadow-sm"
+                  title="Switch to Gemini 3.8 Flash and retry immediately"
+                >
+                  <Sparkles size={13} />
+                  3.8 Flash
+                </button>
                 <button
                   onClick={() => handleSwitchModelAndRetry("gemini-2.0-flash")}
                   className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 transition-colors shadow-sm"
                   title="Switch to Gemini 2.0 Flash and retry immediately"
                 >
                   <Zap size={13} />
-                  Switch to 2.0 Flash & Retry
+                  2.0 Flash
                 </button>
                 <button
                   onClick={handleGenerate}

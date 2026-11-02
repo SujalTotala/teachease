@@ -247,11 +247,16 @@ class StorageService {
   // Teacher AI Model Preferences & Resiliency
   public getTeacherModel(teacherId: string): string {
     const sessionModel = sessionStorage.getItem(`teachease_model_${teacherId}`);
-    if (sessionModel) return sessionModel;
+    if (sessionModel && sessionModel !== "gemini-2.5-flash") return sessionModel;
     const localModel = localStorage.getItem(`teachease_model_${teacherId}`);
-    if (localModel) return localModel;
+    if (localModel && localModel !== "gemini-2.5-flash") return localModel;
     const teacher = this.getUsers().find(u => u.uid === teacherId);
-    return teacher?.preferredModel || "gemini-2.5-flash";
+    if (teacher?.preferredModel && teacher.preferredModel !== "gemini-2.5-flash") {
+      return teacher.preferredModel;
+    }
+    // Auto-migrate retired 2.5-flash model to current 3.8-flash flagship
+    this.setTeacherModel(teacherId, "gemini-3.8-flash", true);
+    return "gemini-3.8-flash";
   }
 
   public setTeacherModel(teacherId: string, model: string, remember: boolean = true) {
