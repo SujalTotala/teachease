@@ -15,9 +15,6 @@ export interface UserProfile {
   photoUrl?: string;
   voiceSampleUrl?: string;
   faceDescriptor?: number[];
-  geminiApiKey?: string;
-  preferredModel?: string;
-  autoFallbackEnabled?: boolean;
 }
 
 export interface AttendanceRecord {
@@ -210,81 +207,7 @@ class StorageService {
     return this.getUsers().find(u => u.email.toLowerCase() === email.toLowerCase());
   }
 
-  // BYOK: Teacher Gemini API Key Management (FR-20, FR-22, FR-23)
-  public getTeacherApiKey(teacherId: string): string {
-    const sessionKey = sessionStorage.getItem(`teachease_api_key_${teacherId}`);
-    if (sessionKey) return sessionKey;
-    const localKey = localStorage.getItem(`teachease_api_key_${teacherId}`);
-    if (localKey) return localKey;
-    const teacher = this.getUsers().find(u => u.uid === teacherId);
-    return teacher?.geminiApiKey || "";
-  }
 
-  public setTeacherApiKey(teacherId: string, apiKey: string, remember: boolean = true) {
-    sessionStorage.setItem(`teachease_api_key_${teacherId}`, apiKey);
-    if (remember) {
-      localStorage.setItem(`teachease_api_key_${teacherId}`, apiKey);
-    } else {
-      localStorage.removeItem(`teachease_api_key_${teacherId}`);
-    }
-    const user = this.getUsers().find(u => u.uid === teacherId);
-    if (user) {
-      user.geminiApiKey = apiKey;
-      this.saveUser(user);
-    }
-  }
-
-  public clearTeacherApiKey(teacherId: string) {
-    sessionStorage.removeItem(`teachease_api_key_${teacherId}`);
-    localStorage.removeItem(`teachease_api_key_${teacherId}`);
-    const user = this.getUsers().find(u => u.uid === teacherId);
-    if (user) {
-      delete user.geminiApiKey;
-      this.saveUser(user);
-    }
-  }
-
-  // Teacher AI Model Preferences & Resiliency
-  public getTeacherModel(teacherId: string): string {
-    const sessionModel = sessionStorage.getItem(`teachease_model_${teacherId}`);
-    if (sessionModel && sessionModel !== "gemini-2.5-flash") return sessionModel;
-    const localModel = localStorage.getItem(`teachease_model_${teacherId}`);
-    if (localModel && localModel !== "gemini-2.5-flash") return localModel;
-    const teacher = this.getUsers().find(u => u.uid === teacherId);
-    if (teacher?.preferredModel && teacher.preferredModel !== "gemini-2.5-flash") {
-      return teacher.preferredModel;
-    }
-    // Auto-migrate retired 2.5-flash model to current 3.8-flash flagship
-    this.setTeacherModel(teacherId, "gemini-3.8-flash", true);
-    return "gemini-3.8-flash";
-  }
-
-  public setTeacherModel(teacherId: string, model: string, remember: boolean = true) {
-    sessionStorage.setItem(`teachease_model_${teacherId}`, model);
-    if (remember) {
-      localStorage.setItem(`teachease_model_${teacherId}`, model);
-    }
-    const user = this.getUsers().find(u => u.uid === teacherId);
-    if (user) {
-      user.preferredModel = model;
-      this.saveUser(user);
-    }
-  }
-
-  public getTeacherAutoFallback(teacherId: string): boolean {
-    const val = localStorage.getItem(`teachease_fallback_${teacherId}`);
-    if (val !== null) return val === "true";
-    return true; // enabled by default for resilient 502 recovery
-  }
-
-  public setTeacherAutoFallback(teacherId: string, enabled: boolean) {
-    localStorage.setItem(`teachease_fallback_${teacherId}`, String(enabled));
-    const user = this.getUsers().find(u => u.uid === teacherId);
-    if (user) {
-      user.autoFallbackEnabled = enabled;
-      this.saveUser(user);
-    }
-  }
 
   // Student Management (FR-03, FR-04)
   public getStudents(): UserProfile[] {

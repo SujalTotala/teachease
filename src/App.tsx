@@ -12,11 +12,8 @@ import {
   StickyNote, 
   Presentation, 
   LogOut, 
-  Settings,
   GraduationCap,
-  Users,
-  Key,
-  ShieldCheck
+  Users
 } from "lucide-react";
 import { cn } from "./lib/utils";
 import { motion, AnimatePresence } from "motion/react";
@@ -31,7 +28,6 @@ import ProfileRegistration from "./components/ProfileRegistration";
 import StudentDashboard from "./components/StudentDashboard";
 import AuthForm from "./components/AuthForm";
 import StudentManagementModule from "./components/StudentManagementModule";
-import AISettingsModal from "./components/AISettingsModal";
 import { storage, UserProfile } from "./services/storageService";
 
 type Module = "dashboard" | "attendance" | "students" | "assignments" | "notes" | "ppt";
@@ -41,23 +37,15 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [registrationRequired, setRegistrationRequired] = useState(false);
   const [activeModule, setActiveModule] = useState<Module>("dashboard");
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [hasApiKey, setHasApiKey] = useState(false);
 
   useEffect(() => {
     const u = getLocalUser();
     if (u) {
       setUser(u);
       checkProfile(u);
-      checkApiKey(u.uid);
     }
     setLoading(false);
   }, []);
-
-  const checkApiKey = (teacherId: string) => {
-    const key = storage.getTeacherApiKey(teacherId) || import.meta.env.VITE_GEMINI_API_KEY;
-    setHasApiKey(Boolean(key && key.trim()));
-  };
 
   const checkProfile = (u: UserProfile) => {
     if (u.role === "teacher" && !u.department) {
@@ -72,7 +60,6 @@ export default function App() {
   const handleLogin = (u: UserProfile) => {
     setUser(u);
     checkProfile(u);
-    checkApiKey(u.uid);
   };
 
   const handleRegistrationComplete = () => {
@@ -80,7 +67,6 @@ export default function App() {
     if (u) {
       setUser(u);
       setRegistrationRequired(false);
-      checkApiKey(u.uid);
     }
   };
 
@@ -147,21 +133,6 @@ export default function App() {
               {activeModule === item.id && <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full ml-auto" />}
             </button>
           ))}
-
-          {isTeacher && (
-            <button
-              onClick={() => setIsSettingsOpen(true)}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-semibold text-white/60 hover:bg-white/5 hover:text-white transition-all group"
-            >
-              <Key size={17} className="text-indigo-400/80 group-hover:text-indigo-400" />
-              AI Key (BYOK)
-              {hasApiKey ? (
-                <span className="ml-auto w-2 h-2 rounded-full bg-emerald-400" title="Key Active" />
-              ) : (
-                <span className="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">Set</span>
-              )}
-            </button>
-          )}
         </nav>
 
         {/* User Card */}
@@ -207,32 +178,10 @@ export default function App() {
           </div>
           
           <div className="flex items-center gap-4">
-            {isTeacher && (
-              <button
-                onClick={() => setIsSettingsOpen(true)}
-                className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl glass-card text-xs font-medium hover:bg-white/10 transition-all"
-              >
-                <Key size={14} className="text-indigo-400" />
-                <span className="text-white/80">Gemini Key:</span>
-                {hasApiKey ? (
-                  <span className="text-[11px] font-bold text-emerald-400 flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Active
-                  </span>
-                ) : (
-                  <span className="text-[11px] font-bold text-amber-400 flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Not Set
-                  </span>
-                )}
-              </button>
-            )}
-
-            <button 
-              onClick={() => setIsSettingsOpen(true)}
-              className="w-10 h-10 glass-card rounded-xl flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all"
-              title="AI Settings"
-            >
-              <Settings size={18} />
-            </button>
+            <div className="hidden sm:flex items-center gap-2 px-3.5 py-1.5 rounded-xl glass-card text-xs font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+              <span className="text-white/70 capitalize">{user.role} Account</span>
+            </div>
           </div>
         </header>
 
@@ -252,7 +201,6 @@ export default function App() {
                     <DashboardHome 
                       user={user as any} 
                       onNavigate={(mod) => setActiveModule(mod)} 
-                      onOpenSettings={() => setIsSettingsOpen(true)} 
                     />
                   )}
                   {activeModule === "attendance" && <AttendanceModule user={user as any} />}
@@ -268,16 +216,6 @@ export default function App() {
           </AnimatePresence>
         </div>
       </main>
-
-      {/* Global AI Settings Modal (BYOK) */}
-      {isTeacher && (
-        <AISettingsModal
-          isOpen={isSettingsOpen}
-          onClose={() => setIsSettingsOpen(false)}
-          teacherId={user.uid}
-          onKeyUpdated={(active) => setHasApiKey(active)}
-        />
-      )}
     </div>
   );
 }

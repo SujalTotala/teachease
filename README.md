@@ -19,8 +19,8 @@ Click the button below to deploy your own instance of TeachEase directly to Verc
 ### Deployment Steps:
 1. Click the **Deploy with Vercel** button above.
 2. Sign in with GitHub or GitLab to fork and clone the repository.
-3. Configure the environment variables (or leave them blank to use in-app BYOK settings):
-   - `VITE_GEMINI_API_KEY` *(Optional: Teachers can also enter keys via AI Settings in the app)*
+3. Configure the environment variables:
+   - `VITE_GEMINI_API_KEY` *(Required for AI assignment, notes, and PPT generation)*
    - `VITE_SUPABASE_URL` *(Optional: Dual storage engine supports local storage out of the box)*
    - `VITE_SUPABASE_ANON_KEY` *(Optional)*
 4. Click **Deploy**. Vercel will build and launch your application in under a minute!
@@ -63,11 +63,11 @@ npx vercel --prod
 
 | Variable | Description | Required |
 |---|---|---|
-| `VITE_GEMINI_API_KEY` | Google Gemini API Key from [Google AI Studio](https://aistudio.google.com/) | Optional (Can be provided in-app via BYOK) |
+| `VITE_GEMINI_API_KEY` | Google Gemini API Key from [Google AI Studio](https://aistudio.google.com/) | Yes (Powers assignments, notes, and PPT generation) |
 | `VITE_SUPABASE_URL` | Supabase Project URL | Optional (Local fallback available) |
 | `VITE_SUPABASE_ANON_KEY` | Supabase Anonymous Public Key | Optional |
 
-> **Note on AI Keys:** TeachEase supports a **Bring Your Own Key (BYOK)** model. Teachers can configure their personal Gemini API key directly inside the web UI via **AI Settings**, with support for custom model cascades (`gemini-3.8-flash`, `gemini-2.0-flash`, `gemini-1.5-flash`).
+> **Note on AI Key:** TeachEase uses a centralized Gemini API key configured in `.env` (`VITE_GEMINI_API_KEY`) to power AI generation across assignments, lecture notes, and presentation outlines with automatic model cascade (`gemini-3.8-flash` -> `gemini-2.0-flash` -> `gemini-1.5-flash`).
 
 ---
 

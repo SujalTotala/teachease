@@ -26,15 +26,15 @@ async function startServer() {
   // Solves browser-level 502 Bad Gateway / firewall proxy / CORS issues
   app.post("/api/ai/generate", async (req, res) => {
     try {
-      const { apiKey, prompt, model = "gemini-3.8-flash", config } = req.body;
-      const key = (apiKey || process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "").trim().replace(/^['"]|['"]$/g, "");
+      const { apiKey, prompt, model = "gemini-3-flash-preview", config } = req.body;
+      const key = (process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || apiKey || "").trim().replace(/^['"]|['"]$/g, "");
 
       if (!key) {
-        return res.status(400).json({ error: "Gemini API key is required." });
+        return res.status(400).json({ error: "Gemini API key is required. Please set VITE_GEMINI_API_KEY in your .env file." });
       }
 
-      const requestedModel = (model === "gemini-2.5-flash" || !model) ? "gemini-3.8-flash" : model;
-      const modelsToTry = [requestedModel, "gemini-3.8-flash", "gemini-2.0-flash", "gemini-1.5-flash"].filter(
+      const requestedModel = (!model || model === "gemini-2.5-flash" || model === "gemini-2.0-flash") ? "gemini-3-flash-preview" : model;
+      const modelsToTry = [requestedModel, "gemini-3-flash-preview", "gemini-3.8-flash", "gemini-3.5-flash"].filter(
         (m, idx, arr) => arr.indexOf(m) === idx
       );
 

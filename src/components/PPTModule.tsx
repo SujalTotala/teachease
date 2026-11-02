@@ -7,19 +7,16 @@ import {
   Copy, 
   RefreshCw, 
   History, 
-  Key, 
   Check, 
   Trash2, 
   AlertCircle,
   X,
   ChevronLeft,
   ChevronRight,
-  Layers,
-  Zap
+  Layers
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { storage, UserProfile, AIContent } from "../services/storageService";
-import { AISettingsModal } from "./AISettingsModal";
 
 interface PPTModuleProps {
   user: UserProfile;
@@ -36,7 +33,6 @@ export const PPTModule: React.FC<PPTModuleProps> = ({ user }) => {
   const [showHistory, setShowHistory] = useState(false);
   const [historyList, setHistoryList] = useState<AIContent[]>([]);
   const [selectedHistoryItem, setSelectedHistoryItem] = useState<AIContent | null>(null);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [apiKeyError, setApiKeyError] = useState("");
 
   useEffect(() => {
@@ -60,8 +56,7 @@ export const PPTModule: React.FC<PPTModuleProps> = ({ user }) => {
         subject: subject.trim() || "Computer Science",
         topic: topic.trim(),
         slideCount,
-        detailLevel,
-        teacherId: user.uid
+        detailLevel
       });
 
       const output = content || "Failed to generate presentation content.";
@@ -85,15 +80,11 @@ export const PPTModule: React.FC<PPTModuleProps> = ({ user }) => {
     } catch (err: any) {
       console.error("PPT generation failed:", err);
       const msg = err?.message || String(err);
-      if (msg.includes("Gemini API Key") || msg.includes("API key")) {
-        setApiKeyError("Your Gemini API Key is missing or invalid. Please configure it in AI Settings (BYOK).");
-      } else if (msg.includes("gemini-2.5-flash") || msg.includes("no longer available")) {
-        setApiKeyError(
-          "Model Update: The legacy gemini-2.5-flash model has been retired for new users. Switch to Gemini 3.8 Flash to proceed."
-        );
+      if (msg.includes("Gemini API Key") || msg.includes("API key") || msg.includes("API_KEY") || msg.includes("unauthorized")) {
+        setApiKeyError("Gemini API Key is not configured or invalid. Please check VITE_GEMINI_API_KEY in your .env file.");
       } else if (msg.includes("502") || msg.includes("Bad Gateway") || msg.includes("Gateway")) {
         setApiKeyError(
-          "Google Gemini Gateway (502 Bad Gateway): Google's model servers are temporarily experiencing high traffic or upstream gateway timeout. You can switch models or retry."
+          "Google Gemini Gateway (502 Bad Gateway): Google's model servers are temporarily experiencing high traffic. Please retry in a few moments."
         );
       } else {
         setApiKeyError(`Generation error: ${msg}`);
@@ -101,12 +92,6 @@ export const PPTModule: React.FC<PPTModuleProps> = ({ user }) => {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleSwitchModelAndRetry = (newModel: string) => {
-    storage.setTeacherModel(user.uid, newModel);
-    setApiKeyError("");
-    handleGenerate();
   };
 
   const copyToClipboard = (text: string) => {
@@ -160,17 +145,10 @@ export const PPTModule: React.FC<PPTModuleProps> = ({ user }) => {
             <History size={14} className="text-pink-400" />
             Previous PPTs ({historyList.length})
           </button>
-          <button
-            onClick={() => setIsSettingsOpen(true)}
-            className="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-bold text-white/80 hover:text-white flex items-center gap-2 transition-all"
-          >
-            <Key size={14} className="text-indigo-400" />
-            AI Key Settings
-          </button>
         </div>
       </div>
 
-      {/* API Key Missing / 502 Gateway Alert Banner */}
+      {/* API Key Missing / Gateway Alert Banner */}
       {apiKeyError && (
         <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-rose-300">
           <div className="flex items-start gap-2.5">
@@ -181,47 +159,12 @@ export const PPTModule: React.FC<PPTModuleProps> = ({ user }) => {
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-            {apiKeyError.includes("gemini-2.5-flash") || apiKeyError.includes("no longer available") || apiKeyError.includes("Model Update") ? (
-              <button
-                onClick={() => handleSwitchModelAndRetry("gemini-3.8-flash")}
-                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 transition-colors shadow-sm"
-                title="Switch to Gemini 3.8 Flash and retry immediately"
-              >
-                <Sparkles size={13} />
-                Switch to 3.8 Flash & Retry
-              </button>
-            ) : apiKeyError.includes("502") || apiKeyError.includes("Gateway") ? (
-              <>
-                <button
-                  onClick={() => handleSwitchModelAndRetry("gemini-3.8-flash")}
-                  className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 transition-colors shadow-sm"
-                  title="Switch to Gemini 3.8 Flash and retry immediately"
-                >
-                  <Sparkles size={13} />
-                  3.8 Flash
-                </button>
-                <button
-                  onClick={() => handleSwitchModelAndRetry("gemini-2.0-flash")}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 transition-colors shadow-sm"
-                  title="Switch to Gemini 2.0 Flash and retry immediately"
-                >
-                  <Zap size={13} />
-                  2.0 Flash
-                </button>
-                <button
-                  onClick={handleGenerate}
-                  className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-1.5 transition-colors"
-                >
-                  <RefreshCw size={13} />
-                  Retry
-                </button>
-              </>
-            ) : null}
             <button
-              onClick={() => setIsSettingsOpen(true)}
-              className="px-3 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-400 text-white font-bold text-xs shrink-0 transition-colors"
+              onClick={handleGenerate}
+              className="px-3.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-1.5 transition-colors"
             >
-              AI Settings
+              <RefreshCw size={13} />
+              Retry
             </button>
           </div>
         </div>
@@ -437,16 +380,6 @@ export const PPTModule: React.FC<PPTModuleProps> = ({ user }) => {
           </div>
         </div>
       </div>
-
-      {/* BYOK Settings Modal */}
-      <AISettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        teacherId={user.uid}
-        onKeyUpdated={(hasKey) => {
-          if (hasKey) setApiKeyError("");
-        }}
-      />
     </div>
   );
 };

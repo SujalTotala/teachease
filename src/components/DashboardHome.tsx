@@ -9,7 +9,6 @@ import {
   Presentation, 
   ArrowRight, 
   Users, 
-  Key, 
   Sparkles,
   ShieldCheck
 } from "lucide-react";
@@ -18,14 +17,12 @@ import { motion } from "motion/react";
 interface DashboardHomeProps {
   user: UserProfile;
   onNavigate: (module: any) => void;
-  onOpenSettings?: () => void;
 }
 
-export const DashboardHome: React.FC<DashboardHomeProps> = ({ user, onNavigate, onOpenSettings }) => {
+export const DashboardHome: React.FC<DashboardHomeProps> = ({ user, onNavigate }) => {
   const [studentCount, setStudentCount] = useState(0);
   const [contentCount, setContentCount] = useState(0);
   const [attendanceCount, setAttendanceCount] = useState(0);
-  const [hasApiKey, setHasApiKey] = useState(false);
 
   useEffect(() => {
     const students = storage.getStudents();
@@ -36,9 +33,6 @@ export const DashboardHome: React.FC<DashboardHomeProps> = ({ user, onNavigate, 
 
     const attendance = storage.getAttendance().filter(a => a.teacherId === user.uid);
     setAttendanceCount(attendance.length);
-
-    const key = storage.getTeacherApiKey(user.uid) || import.meta.env.VITE_GEMINI_API_KEY;
-    setHasApiKey(Boolean(key && key.trim()));
   }, [user]);
 
   const quickTools = [
@@ -81,40 +75,6 @@ export const DashboardHome: React.FC<DashboardHomeProps> = ({ user, onNavigate, 
 
   return (
     <div className="space-y-10">
-      {/* BYOK Status Banner */}
-      <div className="glass-card p-6 border-indigo-500/30 bg-indigo-500/5 relative overflow-hidden flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-4 relative z-10">
-          <div className="w-12 h-12 rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30 shrink-0">
-            <Key size={22} />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="font-bold text-base text-white">Bring Your Own Key (BYOK) AI Engine</h3>
-              {hasApiKey ? (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Active
-                </span>
-              ) : (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Key Required
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-white/50 mt-0.5">
-              {hasApiKey
-                ? "Your personal Gemini API key is configured and ready for generation."
-                : "Configure your free Google Gemini API key to enable assignment, notes, and slide generation."}
-            </p>
-          </div>
-        </div>
-
-        <button
-          onClick={onOpenSettings}
-          className="px-5 py-2.5 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-500/25 shrink-0 active:scale-95"
-        >
-          {hasApiKey ? "Manage AI Key" : "Configure API Key"}
-        </button>
-      </div>
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
