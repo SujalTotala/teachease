@@ -41,9 +41,11 @@ export const StudentManagementModule: React.FC<StudentManagementProps> = ({ teac
   const [division, setDivision] = useState("Div A");
   const [email, setEmail] = useState("");
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [faceDescriptor, setFaceDescriptor] = useState<number[] | null>(null);
   const [voiceSampleName, setVoiceSampleName] = useState<string | null>(null);
   const [processingPhoto, setProcessingPhoto] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
   const [formSuccess, setFormSuccess] = useState(false);
 
@@ -51,7 +53,11 @@ export const StudentManagementModule: React.FC<StudentManagementProps> = ({ teac
   const voiceInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    loadStudents();
+    const init = async () => {
+      await storage.syncStudentsFromSupabase();
+      loadStudents();
+    };
+    init();
   }, []);
 
   const loadStudents = () => {
@@ -63,8 +69,25 @@ export const StudentManagementModule: React.FC<StudentManagementProps> = ({ teac
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Validate supported image formats (JPG, JPEG, PNG)
+    const validMimes = ["image/jpeg", "image/png", "image/jpg"];
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    const isValidExt = ["jpg", "jpeg", "png"].includes(ext || "");
+
+    if (!validMimes.includes(file.type) && !isValidExt) {
+      setFormError("Invalid file format. Please upload a JPG, JPEG, or PNG photograph.");
+      setPhotoPreview(null);
+      setPhotoFile(null);
+      setFaceDescriptor(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    setPhotoFile(file);
     setProcessingPhoto(true);
     setFormError("");
+    setFaceDescriptor(null);
+
     try {
       const reader = new FileReader();
       reader.onload = async (event) => {
@@ -76,24 +99,32 @@ export const StudentManagementModule: React.FC<StudentManagementProps> = ({ teac
         img.onload = async () => {
           try {
             const descriptor = await faceService.getFaceEmbedding(img);
-            if (descriptor) {
+            if (descriptor && descriptor.length > 0) {
               setFaceDescriptor(Array.from(descriptor));
+              setFormError("");
             } else {
-              setFormError("No face detected in this photo. Please upload a clear passport-style photo.");
               setFaceDescriptor(null);
+              setFormError("Face detection failed. No face detected in this photo. Please upload a clear, front-facing photograph.");
             }
           } catch (err: any) {
             console.error("Face detection error:", err);
-            setFormError("Face recognition model loading error. Please retry.");
+            setFaceDescriptor(null);
+            setFormError("Face recognition processing failed. Please try again with a clearer photograph.");
           } finally {
             setProcessingPhoto(false);
           }
         };
+        img.onerror = () => {
+          setProcessingPhoto(false);
+          setFaceDescriptor(null);
+          setFormError("Failed to load selected image. Please try another JPG or PNG photo.");
+        };
       };
       reader.readAsDataURL(file);
     } catch (err) {
-      console.error(err);
+      console.error("File reading error:", err);
       setProcessingPhoto(false);
+      setFormError("Error reading photograph file. Please select another image.");
     }
   };
 
@@ -104,16 +135,35 @@ export const StudentManagementModule: React.FC<StudentManagementProps> = ({ teac
     }
   };
 
-  const handleRegisterStudent = (e: React.FormEvent) => {
+  const handleRegisterStudent = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError("");
 
+    // 1. Mandatory Name & Enrollment
     if (!name.trim() || !enrollment.trim()) {
-      setFormError("Student Name and Enrollment Number are required.");
+      setFormError("Student Full Name and Enrollment Number are required.");
       return;
     }
 
-    // Check duplicate enrollment
+    // 2. Mandatory Photo Upload Check
+    if (!photoPreview) {
+      setFormError("Student photograph is mandatory. Please upload a student photograph to register.");
+      return;
+    }
+
+    // 3. Prevent submission while face detection is in progress
+    if (processingPhoto) {
+      setFormError("Please wait while the uploaded photograph is being analyzed for face detection.");
+      return;
+    }
+
+    // 4. Mandatory Face Descriptor Check
+    if (!faceDescriptor || faceDescriptor.length === 0) {
+      setFormError("Face detection failed. A clear front-facing photograph with a detectable face is mandatory for attendance recognition.");
+      return;
+    }
+
+    // 5. Check duplicate enrollment number
     const existing = students.find(
       s => s.enrollmentNumber?.toLowerCase() === enrollment.trim().toLowerCase()
     );
@@ -122,29 +172,42 @@ export const StudentManagementModule: React.FC<StudentManagementProps> = ({ teac
       return;
     }
 
-    const newStudent: UserProfile = {
-      uid: `student-${Math.random().toString(36).substr(2, 9)}`,
-      name: name.trim(),
-      email: email.trim() || `${enrollment.toLowerCase()}@student.teachease.edu`,
-      role: "student",
-      enrollmentNumber: enrollment.trim(),
-      branch,
-      year,
-      division,
-      photoUrl: photoPreview || undefined,
-      faceDescriptor: faceDescriptor || undefined,
-      voiceSampleUrl: voiceSampleName ? `uploaded/${voiceSampleName}` : undefined,
-    };
+    setIsSubmitting(true);
 
-    storage.saveStudent(newStudent);
-    loadStudents();
-    setFormSuccess(true);
+    try {
+      const studentUid = `student-${Math.random().toString(36).substr(2, 9)}`;
 
-    setTimeout(() => {
-      resetForm();
-      setIsRegistering(false);
-      setFormSuccess(false);
-    }, 1000);
+      const newStudent: UserProfile = {
+        uid: studentUid,
+        name: name.trim(),
+        email: email.trim() || `${enrollment.toLowerCase()}@student.teachease.edu`,
+        role: "student",
+        enrollmentNumber: enrollment.trim(),
+        branch,
+        year,
+        division,
+        photoUrl: photoPreview,
+        faceDescriptor: faceDescriptor,
+        voiceSampleUrl: voiceSampleName ? `uploaded/${voiceSampleName}` : undefined,
+      };
+
+      // Save student: uploads photo to Supabase Storage, saves student record and face descriptor in Supabase DB, and saves to LocalStorage
+      await storage.saveStudent(newStudent, photoFile || undefined);
+      loadStudents();
+      setFormSuccess(true);
+
+      setTimeout(() => {
+        resetForm();
+        setIsRegistering(false);
+        setFormSuccess(false);
+        setIsSubmitting(false);
+      }, 1000);
+    } catch (err: any) {
+      console.error("Student registration failed:", err);
+      // Avoid creating partial records on upload failure
+      setFormError(err.message || "Failed to register student. Please check storage bucket permissions and retry.");
+      setIsSubmitting(false);
+    }
   };
 
   const resetForm = () => {
@@ -155,9 +218,12 @@ export const StudentManagementModule: React.FC<StudentManagementProps> = ({ teac
     setYear("Third Year");
     setDivision("Div A");
     setPhotoPreview(null);
+    setPhotoFile(null);
     setFaceDescriptor(null);
     setVoiceSampleName(null);
     setFormError("");
+    setIsSubmitting(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const handleDelete = (uid: string, studentName: string) => {
@@ -192,7 +258,7 @@ export const StudentManagementModule: React.FC<StudentManagementProps> = ({ teac
             Student Directory & Registration
           </h2>
           <p className="text-xs text-white/50 mt-1">
-            Manage academic records and register student facial descriptors for smart attendance
+            Manage academic records and register student photographs for facial recognition attendance
           </p>
         </div>
 
@@ -223,7 +289,7 @@ export const StudentManagementModule: React.FC<StudentManagementProps> = ({ teac
                 Student Enrollment & Facial Embedding (FR-03, FR-04)
               </div>
               <span className="text-[10px] uppercase font-bold text-white/40 tracking-wider">
-                Single Registration for Attendance
+                Photo Upload Mandatory for Attendance
               </span>
             </div>
 
@@ -232,7 +298,7 @@ export const StudentManagementModule: React.FC<StudentManagementProps> = ({ teac
                 {/* Personal Info */}
                 <div>
                   <label className="text-[10px] font-bold text-white/40 uppercase tracking-widest mb-2 block">
-                    Student Full Name *
+                    Student Full Name <span className="text-rose-400 font-bold">*</span>
                   </label>
                   <input
                     type="text"
@@ -246,7 +312,7 @@ export const StudentManagementModule: React.FC<StudentManagementProps> = ({ teac
 
                 <div>
                   <label className="text-[10px] font-bold text-white/40 uppercase tracking-widest mb-2 block">
-                    Enrollment Number *
+                    Enrollment Number <span className="text-rose-400 font-bold">*</span>
                   </label>
                   <input
                     type="text"
@@ -276,7 +342,7 @@ export const StudentManagementModule: React.FC<StudentManagementProps> = ({ teac
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div>
                   <label className="text-[10px] font-bold text-white/40 uppercase tracking-widest mb-2 block">
-                    Branch / Department
+                    Branch / Department <span className="text-rose-400 font-bold">*</span>
                   </label>
                   <select
                     value={branch}
@@ -293,7 +359,7 @@ export const StudentManagementModule: React.FC<StudentManagementProps> = ({ teac
 
                 <div>
                   <label className="text-[10px] font-bold text-white/40 uppercase tracking-widest mb-2 block">
-                    Academic Year
+                    Academic Year <span className="text-rose-400 font-bold">*</span>
                   </label>
                   <select
                     value={year}
@@ -309,7 +375,7 @@ export const StudentManagementModule: React.FC<StudentManagementProps> = ({ teac
 
                 <div>
                   <label className="text-[10px] font-bold text-white/40 uppercase tracking-widest mb-2 block">
-                    Class Division
+                    Class Division <span className="text-rose-400 font-bold">*</span>
                   </label>
                   <select
                     value={division}
@@ -325,57 +391,119 @@ export const StudentManagementModule: React.FC<StudentManagementProps> = ({ teac
 
               {/* Photo & Voice Sample Upload */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-                {/* Photograph & Face Embedding */}
+                {/* Mandatory Photograph & Face Embedding */}
                 <div className="p-5 rounded-2xl bg-white/5 border border-white/10 space-y-4">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-bold text-white flex items-center gap-2">
                       <ScanFace size={16} className="text-indigo-400" />
-                      Student Photograph & Face Descriptor
+                      Student Photograph <span className="text-rose-400 font-bold text-sm">*</span>
                     </label>
-                    {faceDescriptor && (
+                    {processingPhoto ? (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 flex items-center gap-1 animate-pulse">
+                        <RefreshCw size={12} className="animate-spin" /> Detecting Face...
+                      </span>
+                    ) : faceDescriptor ? (
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
                         <CheckCircle2 size={12} /> Descriptor Ready
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 flex items-center gap-1">
+                        Mandatory Field
                       </span>
                     )}
                   </div>
                   <p className="text-[11px] text-white/50">
-                    Upload a front-facing image. Our neural net generates the 128-D facial embedding for attendance matching.
+                    Upload a front-facing image (JPG, JPEG, or PNG). Our AI neural net generates the 128-D facial descriptor required for automated attendance marking.
                   </p>
 
                   <div className="flex items-center gap-4">
                     {photoPreview ? (
-                      <div className="relative w-20 h-20 rounded-xl overflow-hidden border-2 border-indigo-500/50 shrink-0">
-                        <img src={photoPreview} alt="Preview" className="w-full h-full object-cover" />
+                      <div className="relative w-24 h-24 rounded-xl overflow-hidden border-2 border-indigo-500/50 shrink-0 group">
+                        <img src={photoPreview} alt="Student Preview" className="w-full h-full object-cover" />
                         {processingPhoto && (
-                          <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
-                            <RefreshCw size={16} className="animate-spin text-indigo-400" />
+                          <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center gap-1">
+                            <RefreshCw size={18} className="animate-spin text-indigo-400" />
+                            <span className="text-[9px] text-white/80 font-medium">Scanning</span>
+                          </div>
+                        )}
+                        {!processingPhoto && (
+                          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => fileInputRef.current?.click()}
+                              title="Change photo"
+                              className="p-1.5 rounded-lg bg-white/20 hover:bg-white/40 text-white transition-all"
+                            >
+                              <Upload size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPhotoPreview(null);
+                                setPhotoFile(null);
+                                setFaceDescriptor(null);
+                                if (fileInputRef.current) fileInputRef.current.value = "";
+                              }}
+                              title="Remove photo"
+                              className="p-1.5 rounded-lg bg-rose-500/50 hover:bg-rose-500 text-white transition-all"
+                            >
+                              <Trash2 size={14} />
+                            </button>
                           </div>
                         )}
                       </div>
                     ) : (
-                      <div className="w-20 h-20 rounded-xl bg-black/40 border border-dashed border-white/20 flex flex-col items-center justify-center text-white/30 shrink-0">
-                        <Camera size={24} />
+                      <div 
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-24 h-24 rounded-xl bg-black/40 border-2 border-dashed border-white/20 hover:border-indigo-400/60 flex flex-col items-center justify-center text-white/40 hover:text-indigo-400 transition-all cursor-pointer shrink-0"
+                      >
+                        <Camera size={26} />
+                        <span className="text-[9px] font-bold mt-1 uppercase tracking-wider text-white/40">Select Photo</span>
                       </div>
                     )}
 
                     <div className="space-y-2">
                       <input
                         type="file"
-                        accept="image/jpeg,image/png,image/jpg"
+                        accept="image/jpeg,image/png,image/jpg,.jpg,.jpeg,.png"
                         ref={fileInputRef}
                         onChange={handlePhotoUpload}
                         className="hidden"
                       />
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={processingPhoto}
-                        className="px-4 py-2.5 rounded-xl border border-white/10 hover:bg-white/10 text-xs font-bold text-white flex items-center gap-2 transition-all disabled:opacity-50"
-                      >
-                        <Upload size={14} />
-                        {processingPhoto ? "Analyzing Face..." : photoPreview ? "Change Photo" : "Upload Photograph"}
-                      </button>
-                      <span className="text-[10px] text-white/30 block">JPG, PNG up to 10MB</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={processingPhoto || isSubmitting}
+                          className="px-4 py-2.5 rounded-xl border border-white/10 hover:bg-white/10 text-xs font-bold text-white flex items-center gap-2 transition-all disabled:opacity-50"
+                        >
+                          <Upload size={14} />
+                          {processingPhoto ? "Analyzing Face..." : photoPreview ? "Change Photo" : "Upload Photograph *"}
+                        </button>
+                        {photoPreview && !processingPhoto && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPhotoPreview(null);
+                              setPhotoFile(null);
+                              setFaceDescriptor(null);
+                              if (fileInputRef.current) fileInputRef.current.value = "";
+                            }}
+                            className="p-2.5 rounded-xl border border-white/10 hover:bg-rose-500/20 text-rose-300 text-xs transition-all"
+                            title="Remove photo"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-white/40 block">
+                        Accepted Formats: <strong className="text-white/60">JPG, JPEG, PNG</strong> (Max 10MB)
+                      </span>
+                      {faceDescriptor && (
+                        <span className="text-[10px] text-emerald-400/90 flex items-center gap-1 font-medium">
+                          <CheckCircle2 size={12} /> 128-D Facial Embedding extracted successfully
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -431,18 +559,23 @@ export const StudentManagementModule: React.FC<StudentManagementProps> = ({ teac
                 <button
                   type="button"
                   onClick={() => setIsRegistering(false)}
-                  className="px-5 py-3 rounded-xl text-white/50 hover:text-white text-xs font-bold transition-colors"
+                  disabled={isSubmitting}
+                  className="px-5 py-3 rounded-xl text-white/50 hover:text-white text-xs font-bold transition-colors disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={processingPhoto}
+                  disabled={processingPhoto || isSubmitting}
                   className="px-7 py-3 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-bold flex items-center gap-2 transition-all shadow-lg shadow-indigo-500/25 active:scale-95 disabled:opacity-50"
                 >
                   {formSuccess ? (
                     <>
                       <CheckCircle2 size={16} /> Registered Successfully!
+                    </>
+                  ) : isSubmitting ? (
+                    <>
+                      <RefreshCw size={16} className="animate-spin" /> Saving & Uploading Photo...
                     </>
                   ) : (
                     <>
@@ -456,16 +589,16 @@ export const StudentManagementModule: React.FC<StudentManagementProps> = ({ teac
         )}
       </AnimatePresence>
 
-      {/* Filter & Search Bar */}
-      <div className="glass-card p-4 flex flex-col md:flex-row items-center gap-4">
-        <div className="relative flex-1 w-full">
-          <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30" />
+      {/* Search & Filter Toolbar */}
+      <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="relative w-full md:w-80">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" size={16} />
           <input
             type="text"
-            placeholder="Search by student name or enrollment number..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-black/30 border border-white/5 rounded-xl pl-11 pr-4 py-3 text-xs text-white focus:outline-none focus:border-indigo-500/50 transition-all placeholder:text-white/30"
+            placeholder="Search student or enrollment..."
+            className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-xs text-white placeholder:text-white/20 focus:outline-none focus:border-indigo-500 transition-all"
           />
         </div>
 
@@ -596,4 +729,5 @@ export const StudentManagementModule: React.FC<StudentManagementProps> = ({ teac
     </div>
   );
 };
+
 export default StudentManagementModule;

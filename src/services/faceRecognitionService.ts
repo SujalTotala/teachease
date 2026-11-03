@@ -3,7 +3,9 @@ import * as faceapi from 'face-api.js';
 class FaceRecognitionService {
   private static instance: FaceRecognitionService;
   private isLoaded: boolean = false;
-  private MODEL_URL = 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/';
+  private loadingPromise: Promise<void> | null = null;
+  private PRIMARY_MODEL_URL = 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/';
+  private FALLBACK_MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights/';
 
   private constructor() {}
 
@@ -14,21 +16,38 @@ class FaceRecognitionService {
     return FaceRecognitionService.instance;
   }
 
-  public async loadModels() {
+  public async loadModels(): Promise<void> {
     if (this.isLoaded) return;
-    
-    try {
-      await Promise.all([
-        faceapi.nets.ssdMobilenetv1.loadFromUri(this.MODEL_URL),
-        faceapi.nets.faceLandmark68Net.loadFromUri(this.MODEL_URL),
-        faceapi.nets.faceRecognitionNet.loadFromUri(this.MODEL_URL),
-      ]);
-      this.isLoaded = true;
-      console.log('Face models loaded successfully');
-    } catch (error) {
-      console.error('Error loading face models:', error);
-      throw error;
-    }
+    if (this.loadingPromise) return this.loadingPromise;
+
+    this.loadingPromise = (async () => {
+      try {
+        await Promise.all([
+          faceapi.nets.ssdMobilenetv1.loadFromUri(this.PRIMARY_MODEL_URL),
+          faceapi.nets.faceLandmark68Net.loadFromUri(this.PRIMARY_MODEL_URL),
+          faceapi.nets.faceRecognitionNet.loadFromUri(this.PRIMARY_MODEL_URL),
+        ]);
+        this.isLoaded = true;
+        console.log('Face models loaded successfully from primary source');
+      } catch (primaryErr) {
+        console.warn('Failed to load face models from primary URL, trying fallback CDN...', primaryErr);
+        try {
+          await Promise.all([
+            faceapi.nets.ssdMobilenetv1.loadFromUri(this.FALLBACK_MODEL_URL),
+            faceapi.nets.faceLandmark68Net.loadFromUri(this.FALLBACK_MODEL_URL),
+            faceapi.nets.faceRecognitionNet.loadFromUri(this.FALLBACK_MODEL_URL),
+          ]);
+          this.isLoaded = true;
+          console.log('Face models loaded successfully from fallback CDN');
+        } catch (fallbackErr) {
+          console.error('All face model endpoints failed:', fallbackErr);
+          this.loadingPromise = null;
+          throw new Error('Unable to load face recognition models. Please check your internet connection.');
+        }
+      }
+    })();
+
+    return this.loadingPromise;
   }
 
   public async getFaceEmbedding(input: HTMLImageElement | HTMLCanvasElement): Promise<Float32Array | null> {

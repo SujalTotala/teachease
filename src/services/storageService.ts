@@ -207,33 +207,96 @@ class StorageService {
     return this.getUsers().find(u => u.email.toLowerCase() === email.toLowerCase());
   }
 
-
-
   // Student Management (FR-03, FR-04)
   public getStudents(): UserProfile[] {
     return this.getUsers().filter(u => u.role === "student");
   }
 
-  public saveStudent(student: UserProfile) {
+  public async syncStudentsFromSupabase(): Promise<UserProfile[]> {
+    if (!isSupabaseConfigured()) {
+      return this.getStudents();
+    }
+    try {
+      const dbStudents = await supabaseDb.getStudents();
+      if (dbStudents && Array.isArray(dbStudents)) {
+        const currentUsers = this.getUsers();
+        let changed = false;
+
+        dbStudents.forEach((row: any) => {
+          const faceRecord = Array.isArray(row.student_faces) ? row.student_faces[0] : row.student_faces;
+          const descriptor = faceRecord?.descriptor
+            ? (Array.isArray(faceRecord.descriptor) ? faceRecord.descriptor : Array.from(faceRecord.descriptor))
+            : undefined;
+
+          const studentObj: UserProfile = {
+            uid: row.id,
+            name: row.name,
+            email: `${(row.enrollment_number || row.id).toLowerCase()}@student.teachease.edu`,
+            role: "student",
+            enrollmentNumber: row.enrollment_number,
+            branch: row.branch,
+            year: row.year,
+            division: row.division,
+            photoUrl: row.photo_url || faceRecord?.image_url,
+            faceDescriptor: descriptor,
+            voiceSampleUrl: row.voice_sample_url
+          };
+
+          const idx = currentUsers.findIndex(
+            u => u.uid === studentObj.uid || 
+            (studentObj.enrollmentNumber && u.enrollmentNumber?.toLowerCase() === studentObj.enrollmentNumber.toLowerCase())
+          );
+          if (idx > -1) {
+            currentUsers[idx] = { ...currentUsers[idx], ...studentObj };
+            changed = true;
+          } else {
+            currentUsers.push(studentObj);
+            changed = true;
+          }
+        });
+
+        if (changed) {
+          localStorage.setItem("teachease_users", JSON.stringify(currentUsers));
+        }
+      }
+    } catch (err) {
+      console.warn("syncStudentsFromSupabase failed:", err);
+    }
+    return this.getStudents();
+  }
+
+  public async saveStudent(student: UserProfile, photoFile?: File | Blob): Promise<UserProfile> {
     const studentUser: UserProfile = {
       ...student,
       role: "student",
       uid: student.uid || `student-${Math.random().toString(36).substr(2, 9)}`
     };
-    this.saveUser(studentUser);
+
+    let photoUrl = studentUser.photoUrl;
 
     if (isSupabaseConfigured()) {
-      supabaseDb.saveStudent({
+      if (photoFile) {
+        const uploadedUrl = await supabaseDb.uploadStudentPhoto(photoFile, studentUser.uid);
+        if (uploadedUrl) {
+          photoUrl = uploadedUrl;
+          studentUser.photoUrl = uploadedUrl;
+        }
+      }
+
+      await supabaseDb.saveStudent({
         id: studentUser.uid,
         name: studentUser.name,
         enrollment_number: studentUser.enrollmentNumber || "",
         branch: studentUser.branch || "",
         year: studentUser.year || "",
         division: studentUser.division || "",
-        photo_url: studentUser.photoUrl,
+        photo_url: photoUrl,
         voice_sample_url: studentUser.voiceSampleUrl
-      }, studentUser.faceDescriptor);
+      }, studentUser.faceDescriptor, photoUrl);
     }
+
+    this.saveUser(studentUser);
+    return studentUser;
   }
 
   public deleteStudent(studentId: string) {

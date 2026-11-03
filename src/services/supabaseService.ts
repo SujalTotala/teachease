@@ -11,8 +11,62 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured()
   ? createClient(supabaseUrl, supabaseAnonKey)
   : null;
 
-// Database helper operations with graceful degradation
+// Database and storage helper operations with graceful degradation
 export const supabaseDb = {
+  // Storage - Student Photo Upload
+  async uploadStudentPhoto(file: File | Blob, studentId: string): Promise<string> {
+    if (!supabase) {
+      throw new Error("Supabase is not configured.");
+    }
+    const bucketName = "student-photos";
+    const fileExt = file instanceof File ? (file.name.split('.').pop() || 'jpg') : 'jpg';
+    const cleanExt = fileExt.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const fileName = `${studentId}-${Date.now()}.${cleanExt}`;
+    const filePath = `students/${fileName}`;
+
+    // Upload to bucket
+    let { data, error } = await supabase.storage
+      .from(bucketName)
+      .upload(filePath, file, {
+        cacheControl: "3600",
+        upsert: true,
+        contentType: file.type || "image/jpeg"
+      });
+
+    // If bucket doesn't exist yet, attempt to create it
+    if (error && (error.message?.includes("Bucket not found") || (error as any).statusCode === 404 || (error as any).status === 404)) {
+      try {
+        await supabase.storage.createBucket(bucketName, { public: true });
+        const retryResult = await supabase.storage
+          .from(bucketName)
+          .upload(filePath, file, {
+            cacheControl: "3600",
+            upsert: true,
+            contentType: file.type || "image/jpeg"
+          });
+        data = retryResult.data;
+        error = retryResult.error;
+      } catch (createErr) {
+        console.warn("Could not auto-create storage bucket:", createErr);
+      }
+    }
+
+    if (error) {
+      console.error("Supabase storage upload error:", error);
+      throw new Error(`Supabase Storage upload failed: ${error.message}`);
+    }
+
+    const { data: publicUrlData } = supabase.storage
+      .from(bucketName)
+      .getPublicUrl(filePath);
+
+    if (!publicUrlData?.publicUrl) {
+      throw new Error("Failed to retrieve public URL from Supabase Storage.");
+    }
+
+    return publicUrlData.publicUrl;
+  },
+
   // Profiles
   async getProfiles() {
     if (!supabase) return null;
@@ -51,26 +105,59 @@ export const supabaseDb = {
     }
   },
 
-  async saveStudent(student: any, faceDescriptor?: number[]) {
+  async saveStudent(student: any, faceDescriptor?: number[], photoUrl?: string) {
     if (!supabase) return null;
     try {
+      const studentPayload = {
+        id: student.id,
+        name: student.name,
+        enrollment_number: student.enrollment_number,
+        branch: student.branch,
+        year: student.year,
+        division: student.division,
+        photo_url: photoUrl || student.photo_url || null,
+        voice_sample_url: student.voice_sample_url || null,
+      };
+
       const { data: studentData, error: studentError } = await supabase
         .from("students")
-        .upsert(student)
+        .upsert(studentPayload)
         .select()
         .single();
       if (studentError) throw studentError;
 
       if (faceDescriptor && studentData) {
-        await supabase.from("student_faces").upsert({
-          student_id: studentData.id,
-          descriptor: faceDescriptor,
-        });
+        // Check if student face already exists
+        const { data: existingFaces } = await supabase
+          .from("student_faces")
+          .select("id")
+          .eq("student_id", studentData.id)
+          .limit(1);
+
+        if (existingFaces && existingFaces.length > 0) {
+          const { error: updateError } = await supabase
+            .from("student_faces")
+            .update({
+              descriptor: faceDescriptor,
+              image_url: photoUrl || studentPayload.photo_url || null,
+            })
+            .eq("id", existingFaces[0].id);
+          if (updateError) console.warn("Supabase student_faces update failed:", updateError);
+        } else {
+          const { error: insertError } = await supabase
+            .from("student_faces")
+            .insert({
+              student_id: studentData.id,
+              descriptor: faceDescriptor,
+              image_url: photoUrl || studentPayload.photo_url || null,
+            });
+          if (insertError) console.warn("Supabase student_faces insert failed:", insertError);
+        }
       }
       return studentData;
     } catch (err) {
       console.warn("Supabase saveStudent failed:", err);
-      return null;
+      throw err;
     }
   },
 

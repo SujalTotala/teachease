@@ -61,8 +61,12 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({ user }) => {
   const [filterDivision, setFilterDivision] = useState("All");
 
   useEffect(() => {
-    fetchStudents();
-    fetchHistory();
+    const init = async () => {
+      await storage.syncStudentsFromSupabase();
+      fetchStudents();
+      fetchHistory();
+    };
+    init();
   }, [user]);
 
   const fetchStudents = () => {
@@ -126,7 +130,7 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({ user }) => {
             .map(s => ({
               id: s.uid,
               name: s.name,
-              descriptor: new Float32Array(s.faceDescriptor!)
+              descriptor: s.faceDescriptor instanceof Float32Array ? s.faceDescriptor : new Float32Array(s.faceDescriptor!)
             }));
 
           // Detect all faces in photo (FR-06)
