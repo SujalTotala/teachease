@@ -7,21 +7,33 @@ import { GoogleGenAI } from "@google/genai";
  * 2. Node.js backend env variables: process.env.VITE_GEMINI_API_KEY or process.env.GEMINI_API_KEY
  */
 export const getGeminiApiKey = (): string => {
-  // Check Vite env
+  // 1. Direct Vite compile-time literal access (Vite replaces `import.meta.env.VITE_` at build time)
   try {
-    const envKey = (import.meta as any)?.env?.VITE_GEMINI_API_KEY || (import.meta as any)?.env?.GEMINI_API_KEY;
-    if (envKey && typeof envKey === "string" && envKey.trim()) {
-      return envKey.trim().replace(/^['"]|['"]$/g, "");
+    const directViteKey = import.meta.env.VITE_GEMINI_API_KEY;
+    if (directViteKey && typeof directViteKey === "string" && directViteKey.trim()) {
+      return directViteKey.trim().replace(/^['"]|['"]$/g, "");
     }
   } catch {
     // ignore
   }
 
-  // Check Node.js / process env
+  // 2. Fallback to GEMINI_API_KEY if defined
   try {
-    const processKey = (process?.env as any)?.VITE_GEMINI_API_KEY || (process?.env as any)?.GEMINI_API_KEY;
-    if (processKey && typeof processKey === "string" && processKey.trim()) {
-      return processKey.trim().replace(/^['"]|['"]$/g, "");
+    const directAltKey = (import.meta.env as any).GEMINI_API_KEY;
+    if (directAltKey && typeof directAltKey === "string" && directAltKey.trim()) {
+      return directAltKey.trim().replace(/^['"]|['"]$/g, "");
+    }
+  } catch {
+    // ignore
+  }
+
+  // 3. Node.js backend env variables: process.env.VITE_GEMINI_API_KEY or process.env.GEMINI_API_KEY
+  try {
+    if (typeof process !== "undefined" && process?.env) {
+      const processKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+      if (processKey && typeof processKey === "string" && processKey.trim()) {
+        return processKey.trim().replace(/^['"]|['"]$/g, "");
+      }
     }
   } catch {
     // ignore
@@ -164,6 +176,7 @@ export const executeGeminiPrompt = async (
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        apiKey,
         prompt,
         model,
         config: { temperature, maxOutputTokens }
@@ -178,11 +191,11 @@ export const executeGeminiPrompt = async (
     } else {
       const errData = await response.json().catch(() => ({}));
       if (errData?.error) {
-        throw new Error(errData.error);
+        lastError = new Error(errData.error);
       }
     }
   } catch (proxyErr: any) {
-    if (proxyErr?.message && !proxyErr.message.includes("Failed to fetch")) {
+    if (!lastError) {
       lastError = proxyErr;
     }
   }
@@ -231,12 +244,12 @@ export const generateAssignment = async (
   const options: AssignmentOptions =
     typeof optionsOrSubject === "string"
       ? {
-          subject: optionsOrSubject,
-          topic: topicParam || "",
-          difficulty: difficultyParam || "Medium",
-          questionCount: 5,
-          questionTypes: "Mixed (MCQ, Short, Challenge)"
-        }
+        subject: optionsOrSubject,
+        topic: topicParam || "",
+        difficulty: difficultyParam || "Medium",
+        questionCount: 5,
+        questionTypes: "Mixed (MCQ, Short, Challenge)"
+      }
       : optionsOrSubject;
 
   const { subject, topic, difficulty, questionCount = 5, questionTypes = "Mixed (MCQ, Short, Challenge)" } = options;
@@ -296,10 +309,10 @@ export const generateLectureNotes = async (
   const options: NotesOptions =
     typeof optionsOrSubject === "string"
       ? {
-          subject: optionsOrSubject,
-          topic: topicParam || "",
-          detailLevel: detailLevelParam || "Comprehensive"
-        }
+        subject: optionsOrSubject,
+        topic: topicParam || "",
+        detailLevel: detailLevelParam || "Comprehensive"
+      }
       : optionsOrSubject;
 
   const { subject, topic, detailLevel } = options;
@@ -343,11 +356,11 @@ export const generatePPTOptions = async (
   const options: PPTOptions =
     typeof optionsOrSubject === "string"
       ? {
-          subject: optionsOrSubject,
-          topic: topicParam || "",
-          slideCount: slideCountParam || 6,
-          detailLevel: "Detailed"
-        }
+        subject: optionsOrSubject,
+        topic: topicParam || "",
+        slideCount: slideCountParam || 6,
+        detailLevel: "Detailed"
+      }
       : optionsOrSubject;
 
   const { subject, topic, slideCount = 6 } = options;
