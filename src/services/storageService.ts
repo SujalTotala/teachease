@@ -1,4 +1,4 @@
-import { supabaseDb, isSupabaseConfigured } from "./supabaseService";
+import { supabaseDb, supabaseAuth, isSupabaseConfigured } from "./supabaseService";
 
 export interface UserProfile {
   uid: string;
@@ -15,10 +15,32 @@ export interface UserProfile {
   photoUrl?: string;
   voiceSampleUrl?: string;
   faceDescriptor?: number[];
+  avatarUrl?: string;
+}
+
+export interface AttendanceSession {
+  id: string;
+  teacherId: string;
+  subject: string;
+  date: string;
+  year: string;
+  branch: string;
+  division?: string;
+  sessionNumber: string; // e.g. "Session 1", "Session 2", "Session 3"
+  sessionType: "Lecture" | "Practical" | "Tutorial";
+  startTime?: string;    // e.g. "10:30 AM"
+  createdAt: string;
+  totalStudents?: number;
+  presentCount?: number;
+  absentCount?: number;
 }
 
 export interface AttendanceRecord {
   id: string;
+  sessionId?: string;
+  sessionNumber?: string;
+  sessionType?: string;
+  startTime?: string;
   studentId: string;
   studentName: string;
   status: "present" | "absent";
@@ -48,16 +70,31 @@ export interface AIContent {
   createdAt: string;
 }
 
+export const generateUUID = (): string => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
+
 class StorageService {
   private static instance: StorageService;
 
   private constructor() {
-    // Initialize default data if empty or missing
+    this.initDefaultData();
+  }
+
+  private initDefaultData() {
+    // Seed initial demo users if storage is empty
     const existingUsers = localStorage.getItem("teachease_users");
     if (!existingUsers || JSON.parse(existingUsers).length === 0) {
       const demoUsers: UserProfile[] = [
         {
-          uid: "teacher-123",
+          uid: "c38a1649-1d37-4d1a-82bf-79f90f230101",
           name: "Dr. Elizabeth Smith",
           email: "teacher@example.com",
           password: "password123",
@@ -66,7 +103,7 @@ class StorageService {
           subject: "Data Structures & Algorithms"
         },
         {
-          uid: "student-101",
+          uid: "d49b275a-2e48-5e2b-93ca-80e01f340202",
           name: "Alex Johnson",
           email: "alex@example.com",
           password: "password123",
@@ -78,7 +115,7 @@ class StorageService {
           photoUrl: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150&auto=format&fit=crop&q=80"
         },
         {
-          uid: "student-102",
+          uid: "e5ac386b-3f59-6f3c-a4db-91f12e450303",
           name: "Sophia Martinez",
           email: "sophia@example.com",
           password: "password123",
@@ -90,7 +127,7 @@ class StorageService {
           photoUrl: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80"
         },
         {
-          uid: "student-103",
+          uid: "f6bd497c-4a6a-704d-b5ec-a2e23f560404",
           name: "Rohan Sharma",
           email: "rohan@example.com",
           password: "password123",
@@ -102,7 +139,7 @@ class StorageService {
           photoUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80"
         },
         {
-          uid: "student-104",
+          uid: "07ce5a8d-5b7b-815e-c6fd-b3f340670505",
           name: "Emily Watson",
           email: "emily@example.com",
           password: "password123",
@@ -116,16 +153,45 @@ class StorageService {
       ];
       localStorage.setItem("teachease_users", JSON.stringify(demoUsers));
     }
+
+    // Seed initial sessions and attendance
+    if (!localStorage.getItem("teachease_sessions")) {
+      const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
+      const initialSessions: AttendanceSession[] = [
+        {
+          id: "sess-demo-1",
+          teacherId: "c38a1649-1d37-4d1a-82bf-79f90f230101",
+          subject: "Data Structures",
+          date: yesterday,
+          year: "Third Year",
+          branch: "Computer Science",
+          division: "Div A",
+          sessionNumber: "Session 1",
+          sessionType: "Lecture",
+          startTime: "10:30 AM",
+          createdAt: new Date(Date.now() - 86400000).toISOString(),
+          totalStudents: 4,
+          presentCount: 3,
+          absentCount: 1,
+        }
+      ];
+      localStorage.setItem("teachease_sessions", JSON.stringify(initialSessions));
+    }
+
     if (!localStorage.getItem("teachease_attendance")) {
-      // Seed some initial attendance history
+      const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
       const initialAttendance: AttendanceRecord[] = [
         {
           id: "att-1",
-          studentId: "student-101",
+          sessionId: "sess-demo-1",
+          sessionNumber: "Session 1",
+          sessionType: "Lecture",
+          startTime: "10:30 AM",
+          studentId: "d49b275a-2e48-5e2b-93ca-80e01f340202",
           studentName: "Alex Johnson",
           status: "present",
-          date: new Date(Date.now() - 86400000).toISOString().split("T")[0],
-          teacherId: "teacher-123",
+          date: yesterday,
+          teacherId: "c38a1649-1d37-4d1a-82bf-79f90f230101",
           subject: "Data Structures",
           method: "ai",
           branch: "Computer Science",
@@ -136,11 +202,15 @@ class StorageService {
         },
         {
           id: "att-2",
-          studentId: "student-102",
+          sessionId: "sess-demo-1",
+          sessionNumber: "Session 1",
+          sessionType: "Lecture",
+          startTime: "10:30 AM",
+          studentId: "e5ac386b-3f59-6f3c-a4db-91f12e450303",
           studentName: "Sophia Martinez",
           status: "present",
-          date: new Date(Date.now() - 86400000).toISOString().split("T")[0],
-          teacherId: "teacher-123",
+          date: yesterday,
+          teacherId: "c38a1649-1d37-4d1a-82bf-79f90f230101",
           subject: "Data Structures",
           method: "ai",
           branch: "Computer Science",
@@ -151,11 +221,15 @@ class StorageService {
         },
         {
           id: "att-3",
-          studentId: "student-103",
+          sessionId: "sess-demo-1",
+          sessionNumber: "Session 1",
+          sessionType: "Lecture",
+          startTime: "10:30 AM",
+          studentId: "f6bd497c-4a6a-704d-b5ec-a2e23f560404",
           studentName: "Rohan Sharma",
           status: "absent",
-          date: new Date(Date.now() - 86400000).toISOString().split("T")[0],
-          teacherId: "teacher-123",
+          date: yesterday,
+          teacherId: "c38a1649-1d37-4d1a-82bf-79f90f230101",
           subject: "Data Structures",
           method: "manual",
           branch: "Information Technology",
@@ -166,6 +240,7 @@ class StorageService {
       ];
       localStorage.setItem("teachease_attendance", JSON.stringify(initialAttendance));
     }
+
     if (!localStorage.getItem("teachease_content")) {
       localStorage.setItem("teachease_content", JSON.stringify([]));
     }
@@ -178,14 +253,16 @@ class StorageService {
     return StorageService.instance;
   }
 
-  // Auth & Profile Methods
+  // ============================================================================
+  // Auth & Profile Persistence Methods
+  // ============================================================================
   public getUsers(): UserProfile[] {
     return JSON.parse(localStorage.getItem("teachease_users") || "[]");
   }
 
   public saveUser(user: UserProfile) {
     const users = this.getUsers();
-    const index = users.findIndex(u => u.uid === user.uid);
+    const index = users.findIndex(u => u.uid === user.uid || (user.email && u.email?.toLowerCase() === user.email.toLowerCase()));
     if (index > -1) {
       users[index] = { ...users[index], ...user };
     } else {
@@ -193,13 +270,26 @@ class StorageService {
     }
     localStorage.setItem("teachease_users", JSON.stringify(users));
 
+    // Also update active session if it matches this user
+    try {
+      const active = localStorage.getItem("teachease_session");
+      if (active) {
+        const parsed = JSON.parse(active);
+        if (parsed.uid === user.uid || parsed.email?.toLowerCase() === user.email?.toLowerCase()) {
+          localStorage.setItem("teachease_session", JSON.stringify({ ...parsed, ...user }));
+        }
+      }
+    } catch (err) {
+      console.warn("Could not sync teachease_session:", err);
+    }
+
     if (isSupabaseConfigured()) {
       supabaseDb.upsertProfile({
         id: user.uid,
         name: user.name,
         email: user.email,
         role: user.role
-      });
+      }).catch(err => console.warn("Supabase upsertProfile failed in saveUser:", err));
     }
   }
 
@@ -207,7 +297,219 @@ class StorageService {
     return this.getUsers().find(u => u.email.toLowerCase() === email.toLowerCase());
   }
 
-  // Student Management (FR-03, FR-04)
+  /**
+   * Retrieves the active profile across refreshes and restarts.
+   * Prioritizes active Supabase Auth session with database profile joins.
+   */
+  public async getActiveProfile(): Promise<UserProfile | null> {
+    if (isSupabaseConfigured()) {
+      try {
+        const session = await supabaseAuth.getSession();
+        if (session && session.user) {
+          const fullProfile = await supabaseDb.getFullProfile(session.user.id);
+          if (fullProfile) {
+            localStorage.setItem("teachease_session", JSON.stringify(fullProfile));
+            this.saveUser(fullProfile);
+            return fullProfile;
+          }
+        }
+      } catch (err) {
+        console.warn("Could not fetch active profile from Supabase:", err);
+      }
+    }
+
+    // Fall back to persistent localStorage
+    try {
+      const cached = localStorage.getItem("teachease_session");
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch (err) {
+      console.warn("Error reading cached session:", err);
+    }
+    return null;
+  }
+
+  /**
+   * Centralized Login: Tries Supabase Auth first, retrieves full profile,
+   * falls back to cached local users if offline.
+   */
+  public async login(email: string, password: string): Promise<UserProfile> {
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (isSupabaseConfigured()) {
+      try {
+        const authRes = await supabaseAuth.signIn(cleanEmail, password);
+        if (authRes.user) {
+          const profile = await supabaseDb.getFullProfile(authRes.user.id);
+          if (profile) {
+            localStorage.setItem("teachease_session", JSON.stringify(profile));
+            this.saveUser(profile);
+            return profile;
+          }
+          // If profile table doesn't have details yet, construct from user metadata
+          const fallbackUser: UserProfile = {
+            uid: authRes.user.id,
+            name: authRes.user.user_metadata?.name || cleanEmail.split("@")[0],
+            email: authRes.user.email || cleanEmail,
+            role: (authRes.user.user_metadata?.role as "teacher" | "student") || "teacher",
+          };
+          localStorage.setItem("teachease_session", JSON.stringify(fallbackUser));
+          this.saveUser(fallbackUser);
+          return fallbackUser;
+        }
+      } catch (authErr: any) {
+        console.warn("Supabase signIn failed, checking local users:", authErr.message);
+        // If error is definitely invalid credentials and user doesn't exist locally, throw it
+        const localUser = this.getUserByEmail(cleanEmail);
+        if (!localUser || localUser.password !== password) {
+          throw new Error(authErr.message || "Invalid email or password.");
+        }
+      }
+    }
+
+    // Local user check
+    const local = this.getUserByEmail(cleanEmail);
+    if (local && local.password === password) {
+      localStorage.setItem("teachease_session", JSON.stringify(local));
+      return local;
+    }
+
+    throw new Error("Invalid email or password.");
+  }
+
+  /**
+   * Centralized Register: Signs up with Supabase Auth, assigns genuine UUID,
+   * stores profile permanently.
+   */
+  public async register(name: string, email: string, password: string, role: "teacher" | "student"): Promise<UserProfile> {
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (this.getUserByEmail(cleanEmail)) {
+      throw new Error("An account with this email address already exists.");
+    }
+
+    let uid = generateUUID();
+
+    if (isSupabaseConfigured()) {
+      try {
+        const authRes = await supabaseAuth.signUp(cleanEmail, password, name, role);
+        if (authRes.user) {
+          uid = authRes.user.id;
+        }
+      } catch (authErr: any) {
+        console.warn("Supabase signUp warning, creating local account with UUID:", authErr.message);
+      }
+    }
+
+    const newUser: UserProfile = {
+      uid,
+      name: name.trim(),
+      email: cleanEmail,
+      password,
+      role,
+    };
+
+    this.saveUser(newUser);
+    localStorage.setItem("teachease_session", JSON.stringify(newUser));
+    return newUser;
+  }
+
+  public async saveTeacherProfile(userId: string, data: { department: string; subject: string; name?: string; email?: string }): Promise<UserProfile> {
+    const user = this.getUsers().find(u => u.uid === userId) || {
+      uid: userId,
+      name: data.name || "Teacher",
+      email: data.email || "",
+      role: "teacher" as const,
+    };
+
+    const updatedUser: UserProfile = {
+      ...user,
+      department: data.department,
+      subject: data.subject,
+      role: "teacher",
+    };
+
+    this.saveUser(updatedUser);
+    localStorage.setItem("teachease_session", JSON.stringify(updatedUser));
+
+    if (isSupabaseConfigured()) {
+      try {
+        await supabaseDb.saveTeacherProfile(userId, {
+          department: data.department,
+          subject: data.subject,
+          name: updatedUser.name,
+          email: updatedUser.email
+        });
+      } catch (err) {
+        console.warn("Supabase saveTeacherProfile error:", err);
+      }
+    }
+
+    return updatedUser;
+  }
+
+  public async saveStudentProfile(
+    userId: string,
+    data: {
+      name: string;
+      email?: string;
+      enrollmentNumber: string;
+      branch: string;
+      year: string;
+      division: string;
+      photoUrl?: string;
+      voiceSampleUrl?: string;
+      faceDescriptor?: number[];
+    }
+  ): Promise<UserProfile> {
+    const user = this.getUsers().find(u => u.uid === userId) || {
+      uid: userId,
+      name: data.name,
+      email: data.email || `${data.enrollmentNumber.toLowerCase()}@student.teachease.edu`,
+      role: "student" as const,
+    };
+
+    const updatedUser: UserProfile = {
+      ...user,
+      name: data.name,
+      enrollmentNumber: data.enrollmentNumber,
+      branch: data.branch,
+      year: data.year,
+      division: data.division,
+      photoUrl: data.photoUrl,
+      voiceSampleUrl: data.voiceSampleUrl,
+      faceDescriptor: data.faceDescriptor,
+      role: "student",
+    };
+
+    this.saveUser(updatedUser);
+    localStorage.setItem("teachease_session", JSON.stringify(updatedUser));
+
+    if (isSupabaseConfigured()) {
+      try {
+        await supabaseDb.saveStudentProfile(userId, {
+          name: updatedUser.name,
+          email: updatedUser.email,
+          enrollmentNumber: data.enrollmentNumber,
+          branch: data.branch,
+          year: data.year,
+          division: data.division,
+          photoUrl: data.photoUrl,
+          voiceSampleUrl: data.voiceSampleUrl,
+          faceDescriptor: data.faceDescriptor,
+        });
+      } catch (err) {
+        console.warn("Supabase saveStudentProfile error:", err);
+      }
+    }
+
+    return updatedUser;
+  }
+
+  // ============================================================================
+  // Student Management & Synchronization
+  // ============================================================================
   public getStudents(): UserProfile[] {
     return this.getUsers().filter(u => u.role === "student");
   }
@@ -243,8 +545,8 @@ class StorageService {
           };
 
           const idx = currentUsers.findIndex(
-            u => u.uid === studentObj.uid || 
-            (studentObj.enrollmentNumber && u.enrollmentNumber?.toLowerCase() === studentObj.enrollmentNumber.toLowerCase())
+            u => u.uid === studentObj.uid ||
+              (studentObj.enrollmentNumber && u.enrollmentNumber?.toLowerCase() === studentObj.enrollmentNumber.toLowerCase())
           );
           if (idx > -1) {
             currentUsers[idx] = { ...currentUsers[idx], ...studentObj };
@@ -269,7 +571,7 @@ class StorageService {
     const studentUser: UserProfile = {
       ...student,
       role: "student",
-      uid: student.uid || `student-${Math.random().toString(36).substr(2, 9)}`
+      uid: student.uid || generateUUID()
     };
 
     let photoUrl = studentUser.photoUrl;
@@ -304,7 +606,143 @@ class StorageService {
     localStorage.setItem("teachease_users", JSON.stringify(users));
   }
 
-  // Attendance (FR-08, FR-10)
+  // ============================================================================
+  // Session-Based Attendance (Multiple Sessions Per Day Support)
+  // ============================================================================
+  public getAttendanceSessions(teacherId?: string): AttendanceSession[] {
+    const sessions: AttendanceSession[] = JSON.parse(localStorage.getItem("teachease_sessions") || "[]");
+    const filtered = teacherId ? sessions.filter(s => s.teacherId === teacherId) : sessions;
+    return filtered.sort((a, b) => {
+      // Sort by date desc, then createdAt desc
+      const dateCmp = new Date(b.date).getTime() - new Date(a.date).getTime();
+      if (dateCmp !== 0) return dateCmp;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+  }
+
+  public async syncAttendanceSessionsFromSupabase(teacherId?: string): Promise<AttendanceSession[]> {
+    if (!isSupabaseConfigured()) {
+      return this.getAttendanceSessions(teacherId);
+    }
+    try {
+      const dbSessions = await supabaseDb.getAttendanceSessions(teacherId);
+      if (dbSessions && Array.isArray(dbSessions)) {
+        const localSessions = this.getAttendanceSessions();
+        dbSessions.forEach((dbSess: any) => {
+          const sessObj: AttendanceSession = {
+            id: dbSess.id,
+            teacherId: dbSess.teacher_id,
+            subject: dbSess.subject,
+            date: dbSess.date,
+            year: dbSess.year,
+            branch: dbSess.branch,
+            division: dbSess.division,
+            sessionNumber: dbSess.session_number || "Session 1",
+            sessionType: dbSess.session_type || "Lecture",
+            startTime: dbSess.start_time || undefined,
+            createdAt: dbSess.created_at || new Date().toISOString(),
+            totalStudents: dbSess.attendance?.length || undefined,
+            presentCount: dbSess.attendance ? dbSess.attendance.filter((a: any) => a.status === "present").length : undefined,
+            absentCount: dbSess.attendance ? dbSess.attendance.filter((a: any) => a.status === "absent").length : undefined,
+          };
+
+          const idx = localSessions.findIndex(s => s.id === sessObj.id);
+          if (idx > -1) {
+            localSessions[idx] = { ...localSessions[idx], ...sessObj };
+          } else {
+            localSessions.push(sessObj);
+          }
+
+          // Also merge attendance records
+          if (Array.isArray(dbSess.attendance) && dbSess.attendance.length > 0) {
+            const allAtt = this.getAttendance();
+            dbSess.attendance.forEach((r: any) => {
+              const attRecord: AttendanceRecord = {
+                id: r.id,
+                sessionId: sessObj.id,
+                sessionNumber: sessObj.sessionNumber,
+                sessionType: sessObj.sessionType,
+                startTime: sessObj.startTime,
+                studentId: r.student_id,
+                studentName: r.student_name || "Student",
+                status: r.status,
+                date: r.date,
+                teacherId: r.teacher_id,
+                subject: r.subject,
+                method: r.method || "manual",
+                confidence: r.confidence,
+                createdAt: r.created_at || new Date().toISOString()
+              };
+              const attIdx = allAtt.findIndex(a => a.id === attRecord.id || (a.sessionId === attRecord.sessionId && a.studentId === attRecord.studentId));
+              if (attIdx > -1) {
+                allAtt[attIdx] = { ...allAtt[attIdx], ...attRecord };
+              } else {
+                allAtt.push(attRecord);
+              }
+            });
+            localStorage.setItem("teachease_attendance", JSON.stringify(allAtt));
+          }
+        });
+        localStorage.setItem("teachease_sessions", JSON.stringify(localSessions));
+      }
+    } catch (err) {
+      console.warn("syncAttendanceSessionsFromSupabase warning:", err);
+    }
+    return this.getAttendanceSessions(teacherId);
+  }
+
+  public saveAttendanceSession(session: AttendanceSession, records: AttendanceRecord[]) {
+    // 1. Calculate stats
+    const presentCount = records.filter(r => r.status === "present").length;
+    const absentCount = records.filter(r => r.status === "absent").length;
+    const sessionWithStats: AttendanceSession = {
+      ...session,
+      totalStudents: records.length,
+      presentCount,
+      absentCount,
+    };
+
+    // 2. Save Session to localStorage
+    const sessions = this.getAttendanceSessions();
+    const sIndex = sessions.findIndex(s => s.id === session.id);
+    if (sIndex > -1) {
+      sessions[sIndex] = sessionWithStats;
+    } else {
+      sessions.unshift(sessionWithStats);
+    }
+    localStorage.setItem("teachease_sessions", JSON.stringify(sessions));
+
+    // 3. Save Records to localStorage (replacing any existing records for this session)
+    const allAttendance = this.getAttendance();
+    const otherRecords = allAttendance.filter(r => r.sessionId !== session.id);
+    const updatedRecords = [...otherRecords, ...records];
+    localStorage.setItem("teachease_attendance", JSON.stringify(updatedRecords));
+
+    // 4. Save to Supabase
+    if (isSupabaseConfigured()) {
+      supabaseDb.saveAttendanceSession(sessionWithStats, records).catch(err => {
+        console.warn("Supabase saveAttendanceSession error:", err);
+      });
+    }
+  }
+
+  public deleteAttendanceSession(sessionId: string) {
+    // Remove session
+    const sessions = this.getAttendanceSessions().filter(s => s.id !== sessionId);
+    localStorage.setItem("teachease_sessions", JSON.stringify(sessions));
+
+    // Remove associated records
+    const attendance = this.getAttendance().filter(r => r.sessionId !== sessionId);
+    localStorage.setItem("teachease_attendance", JSON.stringify(attendance));
+
+    if (isSupabaseConfigured()) {
+      supabaseDb.deleteAttendanceSession(sessionId).catch(err => {
+        console.warn("Supabase deleteAttendanceSession error:", err);
+      });
+    }
+  }
+
+  // Attendance Records
   public getAttendance(): AttendanceRecord[] {
     return JSON.parse(localStorage.getItem("teachease_attendance") || "[]");
   }
@@ -317,6 +755,7 @@ class StorageService {
     if (isSupabaseConfigured()) {
       supabaseDb.saveAttendanceRecords(records.map(r => ({
         id: r.id,
+        session_id: r.sessionId,
         student_id: r.studentId,
         teacher_id: r.teacherId,
         subject: r.subject,
@@ -333,7 +772,9 @@ class StorageService {
     localStorage.setItem("teachease_attendance", JSON.stringify(all));
   }
 
+  // ============================================================================
   // AI Content (FR-13, FR-16, FR-19)
+  // ============================================================================
   public getContent(type?: "assignment" | "note" | "ppt", teacherId?: string): AIContent[] {
     let items: AIContent[] = JSON.parse(localStorage.getItem("teachease_content") || "[]");
     if (type) {

@@ -38,17 +38,8 @@ export default function App() {
   const [registrationRequired, setRegistrationRequired] = useState(false);
   const [activeModule, setActiveModule] = useState<Module>("dashboard");
 
-  useEffect(() => {
-    const u = getLocalUser();
-    if (u) {
-      setUser(u);
-      checkProfile(u);
-    }
-    setLoading(false);
-  }, []);
-
   const checkProfile = (u: UserProfile) => {
-    if (u.role === "teacher" && !u.department) {
+    if (u.role === "teacher" && (!u.department || !u.subject)) {
       setRegistrationRequired(true);
     } else if (u.role === "student" && !u.enrollmentNumber) {
       setRegistrationRequired(true);
@@ -57,13 +48,51 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    let isMounted = true;
+
+    const initAuth = async () => {
+      try {
+        const activeProfile = await storage.getActiveProfile();
+        if (isMounted) {
+          if (activeProfile) {
+            setUser(activeProfile);
+            checkProfile(activeProfile);
+          } else {
+            const localU = getLocalUser();
+            if (localU) {
+              setUser(localU);
+              checkProfile(localU);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Auth initialization error:", err);
+        const localU = getLocalUser();
+        if (isMounted && localU) {
+          setUser(localU);
+          checkProfile(localU);
+        }
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    };
+
+    initAuth();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   const handleLogin = (u: UserProfile) => {
     setUser(u);
     checkProfile(u);
   };
 
-  const handleRegistrationComplete = () => {
-    const u = getLocalUser();
+  const handleRegistrationComplete = async () => {
+    const updated = await storage.getActiveProfile();
+    const u = updated || getLocalUser();
     if (u) {
       setUser(u);
       setRegistrationRequired(false);

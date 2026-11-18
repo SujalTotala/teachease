@@ -81,16 +81,7 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({ user }) => {
       loadHistory();
     } catch (err: any) {
       console.error("Assignment generation failed:", err);
-      const msg = err?.message || String(err);
-      if (msg.includes("Gemini API Key") || msg.includes("API key") || msg.includes("API_KEY") || msg.includes("unauthorized")) {
-        setApiKeyError("Gemini API Key is not configured or invalid. Please check VITE_GEMINI_API_KEY in your .env file.");
-      } else if (msg.includes("502") || msg.includes("Bad Gateway") || msg.includes("Gateway")) {
-        setApiKeyError(
-          "Google Gemini Gateway (502 Bad Gateway): Google's model servers are temporarily experiencing high traffic. Please retry in a few moments."
-        );
-      } else {
-        setApiKeyError(`Generation error: ${msg}`);
-      }
+      setApiKeyError(err?.message || "Failed to generate assignment. Please verify your connection.");
     } finally {
       setLoading(false);
     }

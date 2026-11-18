@@ -60,9 +60,26 @@ CREATE TABLE IF NOT EXISTS public.student_faces (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 6. Attendance Records Table
+-- 6. Attendance Sessions Table (Multiple Sessions per Day Support)
+CREATE TABLE IF NOT EXISTS public.attendance_sessions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    teacher_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    subject TEXT NOT NULL,
+    date DATE NOT NULL DEFAULT CURRENT_DATE,
+    year TEXT NOT NULL,
+    branch TEXT NOT NULL,
+    division TEXT DEFAULT 'Div A',
+    session_number TEXT NOT NULL DEFAULT 'Session 1',
+    session_type TEXT NOT NULL DEFAULT 'Lecture',
+    start_time TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 7. Attendance Records Table
 CREATE TABLE IF NOT EXISTS public.attendance (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    session_id UUID REFERENCES public.attendance_sessions(id) ON DELETE CASCADE,
     student_id UUID NOT NULL REFERENCES public.students(id) ON DELETE CASCADE,
     teacher_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
     subject TEXT NOT NULL,
@@ -70,10 +87,11 @@ CREATE TABLE IF NOT EXISTS public.attendance (
     status TEXT NOT NULL CHECK (status IN ('present', 'absent')),
     method TEXT NOT NULL CHECK (method IN ('manual', 'ai')),
     confidence NUMERIC(4,3), -- Recognition confidence distance (0.0 to 1.0)
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    CONSTRAINT unique_student_session UNIQUE (session_id, student_id)
 );
 
--- 7. Assignments Table (Generated AI Assignments)
+-- 8. Assignments Table (Generated AI Assignments)
 CREATE TABLE IF NOT EXISTS public.assignments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     teacher_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
@@ -86,7 +104,7 @@ CREATE TABLE IF NOT EXISTS public.assignments (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 8. Notes Table (Generated AI Lecture Notes)
+-- 9. Notes Table (Generated AI Lecture Notes)
 CREATE TABLE IF NOT EXISTS public.notes (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     teacher_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
@@ -97,7 +115,7 @@ CREATE TABLE IF NOT EXISTS public.notes (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 9. Presentations Table (Generated AI PPT Content)
+-- 10. Presentations Table (Generated AI PPT Content)
 CREATE TABLE IF NOT EXISTS public.presentations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     teacher_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
@@ -119,14 +137,21 @@ ALTER TABLE public.teachers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.students ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.subjects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.student_faces ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.attendance_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.attendance ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.assignments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.presentations ENABLE ROW LEVEL SECURITY;
 
--- Profiles: Users can read all profiles, update own profile
+-- Profiles: Users can read all profiles, insert during registration, update own profile
 CREATE POLICY "Allow public read of profiles" ON public.profiles FOR SELECT USING (true);
+CREATE POLICY "Allow public insert of profiles" ON public.profiles FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow individual update of own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
+
+-- Teachers: Authorized read, insert, and update
+CREATE POLICY "Allow public read of teachers" ON public.teachers FOR SELECT USING (true);
+CREATE POLICY "Allow teachers to insert teachers profile" ON public.teachers FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow teachers to update teachers profile" ON public.teachers FOR UPDATE USING (true);
 
 -- Students: Authorized teachers can view and manage students
 CREATE POLICY "Allow teachers to view students" ON public.students FOR SELECT TO authenticated USING (true);
@@ -137,9 +162,13 @@ CREATE POLICY "Allow teachers to update students" ON public.students FOR UPDATE 
 CREATE POLICY "Allow authenticated read of student faces" ON public.student_faces FOR SELECT TO authenticated USING (true);
 CREATE POLICY "Allow authenticated insert of student faces" ON public.student_faces FOR INSERT TO authenticated WITH CHECK (true);
 
+-- Attendance Sessions: View and manage sessions
+CREATE POLICY "Allow authenticated view of attendance_sessions" ON public.attendance_sessions FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Allow teachers to manage attendance_sessions" ON public.attendance_sessions FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
 -- Attendance: Teachers can record and read attendance
 CREATE POLICY "Allow authenticated view of attendance" ON public.attendance FOR SELECT TO authenticated USING (true);
-CREATE POLICY "Allow teachers to insert attendance" ON public.attendance FOR INSERT TO authenticated WITH CHECK (auth.uid() = teacher_id OR true);
+CREATE POLICY "Allow teachers to insert attendance" ON public.attendance FOR INSERT TO authenticated WITH CHECK (true);
 
 -- Academic Content: Teachers have full control over their generated content
 CREATE POLICY "Allow teachers to view own assignments" ON public.assignments FOR SELECT TO authenticated USING (auth.uid() = teacher_id OR true);
@@ -153,8 +182,9 @@ CREATE POLICY "Allow teachers to create presentations" ON public.presentations F
 
 -- ==============================================================================
 -- Storage Buckets Setup (Supabase Storage)
--- SRS Section 12: student-photos, voice-samples
+-- SRS Section 12: student-photos
 -- ==============================================================================
--- Note: Create these buckets in your Supabase dashboard under Storage:
 -- 1. 'student-photos' (Public bucket for avatar and recognition reference)
--- 2. 'voice-samples'  (Private / authenticated bucket)
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('student-photos', 'student-photos', true)
+ON CONFLICT (id) DO UPDATE SET public = true;

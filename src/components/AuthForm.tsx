@@ -1,8 +1,7 @@
 
 import React, { useState } from "react";
 import { storage, UserProfile } from "../services/storageService";
-import { setLocalSession } from "../lib/firebase";
-import { LogIn, UserPlus, Mail, Lock, User, GraduationCap } from "lucide-react";
+import { LogIn, UserPlus, Mail, Lock, User, GraduationCap, Loader2 } from "lucide-react";
 import { motion } from "motion/react";
 
 interface AuthFormProps {
@@ -16,35 +15,31 @@ const AuthForm: React.FC<AuthFormProps> = ({ onLogin }) => {
   const [name, setName] = useState("");
   const [role, setRole] = useState<"teacher" | "student">("teacher");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setLoading(true);
 
-    if (isLogin) {
-      const user = storage.getUserByEmail(email);
-      if (user && user.password === password) {
-        setLocalSession(user);
+    try {
+      if (isLogin) {
+        const user = await storage.login(email, password);
         onLogin(user);
       } else {
-        setError("Invalid email or password");
+        if (!name.trim()) {
+          setError("Please enter your full name");
+          setLoading(false);
+          return;
+        }
+        const newUser = await storage.register(name, email, password, role);
+        onLogin(newUser);
       }
-    } else {
-      if (storage.getUserByEmail(email)) {
-        setError("User already exists");
-        return;
-      }
-
-      const newUser: UserProfile = {
-        uid: Math.random().toString(36).substr(2, 9),
-        name,
-        email,
-        password,
-        role,
-      };
-      storage.saveUser(newUser);
-      setLocalSession(newUser);
-      onLogin(newUser);
+    } catch (err: any) {
+      console.error("Auth action failed:", err);
+      setError(err.message || "Authentication failed. Please verify your credentials.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -144,10 +139,20 @@ const AuthForm: React.FC<AuthFormProps> = ({ onLogin }) => {
 
           <button 
             type="submit"
-            className="w-full py-4 bg-indigo-500 text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-indigo-400 transition-all shadow-xl active:scale-[0.98]"
+            disabled={loading}
+            className="w-full py-4 bg-indigo-500 text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-indigo-400 transition-all shadow-xl active:scale-[0.98] disabled:opacity-50"
           >
-            {isLogin ? <LogIn size={18} /> : <UserPlus size={18} />}
-            {isLogin ? "Login to Workspace" : "Create Account"}
+            {loading ? (
+              <>
+                <Loader2 size={18} className="animate-spin" />
+                Please wait...
+              </>
+            ) : (
+              <>
+                {isLogin ? <LogIn size={18} /> : <UserPlus size={18} />}
+                {isLogin ? "Login to Workspace" : "Create Account"}
+              </>
+            )}
           </button>
         </form>
 
