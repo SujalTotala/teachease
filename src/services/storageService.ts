@@ -1,4 +1,5 @@
 import { supabaseDb, supabaseAuth, isSupabaseConfigured } from "./supabaseService";
+import { apiService } from "./apiService";
 
 export interface UserProfile {
   uid: string;
@@ -337,6 +338,19 @@ class StorageService {
   public async login(email: string, password: string): Promise<UserProfile> {
     const cleanEmail = email.trim().toLowerCase();
 
+    // 1. Try Render PostgreSQL backend API first
+    try {
+      const res = await apiService.login({ email: cleanEmail, password });
+      if (res && res.user) {
+        localStorage.setItem("teachease_session", JSON.stringify(res.user));
+        this.saveUser(res.user);
+        return res.user;
+      }
+    } catch (apiErr: any) {
+      // If server returned specific credential error, don't throw yet—check Supabase or local
+      console.warn("Backend API login notice:", apiErr?.message);
+    }
+
     if (isSupabaseConfigured()) {
       try {
         const authRes = await supabaseAuth.signIn(cleanEmail, password);
@@ -379,7 +393,7 @@ class StorageService {
   }
 
   /**
-   * Centralized Register: Signs up with Supabase Auth, assigns genuine UUID,
+   * Centralized Register: Signs up with Backend API / Supabase Auth, assigns genuine UUID,
    * stores profile permanently.
    */
   public async register(name: string, email: string, password: string, role: "teacher" | "student"): Promise<UserProfile> {
@@ -391,6 +405,17 @@ class StorageService {
 
     let uid = generateUUID();
 
+    // 1. Try Render PostgreSQL backend API
+    try {
+      const apiRes = await apiService.register({ id: uid, name, email: cleanEmail, password, role });
+      if (apiRes && apiRes.user && apiRes.user.id) {
+        uid = apiRes.user.id;
+      }
+    } catch (apiErr: any) {
+      console.warn("Backend API register notice:", apiErr?.message);
+    }
+
+    // 2. Try Supabase Auth
     if (isSupabaseConfigured()) {
       try {
         const authRes = await supabaseAuth.signUp(cleanEmail, password, name, role);
@@ -432,6 +457,19 @@ class StorageService {
 
     this.saveUser(updatedUser);
     localStorage.setItem("teachease_session", JSON.stringify(updatedUser));
+
+    // Sync with Render PostgreSQL backend
+    try {
+      await apiService.saveTeacherProfile({
+        userId,
+        department: data.department,
+        subject: data.subject,
+        name: updatedUser.name,
+        email: updatedUser.email
+      });
+    } catch (err: any) {
+      console.warn("Backend API saveTeacherProfile notice:", err.message);
+    }
 
     if (isSupabaseConfigured()) {
       try {
@@ -486,6 +524,24 @@ class StorageService {
     this.saveUser(updatedUser);
     localStorage.setItem("teachease_session", JSON.stringify(updatedUser));
 
+    // Sync with Render PostgreSQL backend
+    try {
+      await apiService.saveStudentProfile({
+        userId,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        enrollmentNumber: data.enrollmentNumber,
+        branch: data.branch,
+        year: data.year,
+        division: data.division,
+        photoUrl: data.photoUrl,
+        voiceSampleUrl: data.voiceSampleUrl,
+        faceDescriptor: data.faceDescriptor,
+      });
+    } catch (err: any) {
+      console.warn("Backend API saveStudentProfile notice:", err.message);
+    }
+
     if (isSupabaseConfigured()) {
       try {
         await supabaseDb.saveStudentProfile(userId, {
@@ -515,6 +571,35 @@ class StorageService {
   }
 
   public async syncStudentsFromSupabase(): Promise<UserProfile[]> {
+    // 1. Try Render PostgreSQL backend API first
+    try {
+      const apiRes = await apiService.getStudents();
+      if (apiRes && Array.isArray(apiRes.students) && apiRes.students.length > 0) {
+        const currentUsers = this.getUsers();
+        let changed = false;
+
+        apiRes.students.forEach((studentObj: any) => {
+          const idx = currentUsers.findIndex(
+            u => u.uid === studentObj.uid ||
+              (studentObj.enrollmentNumber && u.enrollmentNumber?.toLowerCase() === studentObj.enrollmentNumber.toLowerCase())
+          );
+          if (idx > -1) {
+            currentUsers[idx] = { ...currentUsers[idx], ...studentObj };
+            changed = true;
+          } else {
+            currentUsers.push(studentObj);
+            changed = true;
+          }
+        });
+
+        if (changed) {
+          localStorage.setItem("teachease_users", JSON.stringify(currentUsers));
+        }
+      }
+    } catch (err: any) {
+      console.warn("Backend API getStudents notice:", err.message);
+    }
+
     if (!isSupabaseConfigured()) {
       return this.getStudents();
     }
@@ -621,6 +706,39 @@ class StorageService {
   }
 
   public async syncAttendanceSessionsFromSupabase(teacherId?: string): Promise<AttendanceSession[]> {
+    // 1. Try Render PostgreSQL backend API first
+    try {
+      const apiRes = await apiService.getAttendanceSessions(teacherId);
+      if (apiRes && Array.isArray(apiRes.sessions) && apiRes.sessions.length > 0) {
+        const localSessions = this.getAttendanceSessions();
+        apiRes.sessions.forEach((sessObj: any) => {
+          const idx = localSessions.findIndex(s => s.id === sessObj.id);
+          if (idx > -1) {
+            localSessions[idx] = { ...localSessions[idx], ...sessObj };
+          } else {
+            localSessions.push(sessObj);
+          }
+        });
+        localStorage.setItem("teachease_sessions", JSON.stringify(localSessions));
+      }
+
+      const recRes = await apiService.getAttendanceRecords(undefined, teacherId);
+      if (recRes && Array.isArray(recRes.records) && recRes.records.length > 0) {
+        const allAtt = this.getAttendance();
+        recRes.records.forEach((attRecord: any) => {
+          const attIdx = allAtt.findIndex(a => a.id === attRecord.id || (a.sessionId === attRecord.sessionId && a.studentId === attRecord.studentId));
+          if (attIdx > -1) {
+            allAtt[attIdx] = { ...allAtt[attIdx], ...attRecord };
+          } else {
+            allAtt.push(attRecord);
+          }
+        });
+        localStorage.setItem("teachease_attendance", JSON.stringify(allAtt));
+      }
+    } catch (err: any) {
+      console.warn("Backend API getAttendanceSessions notice:", err.message);
+    }
+
     if (!isSupabaseConfigured()) {
       return this.getAttendanceSessions(teacherId);
     }
@@ -718,7 +836,16 @@ class StorageService {
     const updatedRecords = [...otherRecords, ...records];
     localStorage.setItem("teachease_attendance", JSON.stringify(updatedRecords));
 
-    // 4. Save to Supabase
+    // 4. Save to Render Backend
+    try {
+      apiService.saveAttendanceSession(sessionWithStats, records).catch(err => {
+        console.warn("Backend API saveAttendanceSession notice:", err.message);
+      });
+    } catch {
+      // ignore
+    }
+
+    // 5. Save to Supabase
     if (isSupabaseConfigured()) {
       supabaseDb.saveAttendanceSession(sessionWithStats, records).catch(err => {
         console.warn("Supabase saveAttendanceSession error:", err);
@@ -734,6 +861,15 @@ class StorageService {
     // Remove associated records
     const attendance = this.getAttendance().filter(r => r.sessionId !== sessionId);
     localStorage.setItem("teachease_attendance", JSON.stringify(attendance));
+
+    // Delete from Render Backend
+    try {
+      apiService.deleteAttendanceSession(sessionId).catch(err => {
+        console.warn("Backend API deleteAttendanceSession notice:", err.message);
+      });
+    } catch {
+      // ignore
+    }
 
     if (isSupabaseConfigured()) {
       supabaseDb.deleteAttendanceSession(sessionId).catch(err => {
@@ -791,6 +927,12 @@ class StorageService {
     all.unshift(content);
     localStorage.setItem("teachease_content", JSON.stringify(all));
 
+    try {
+      apiService.saveContent(content).catch(err => console.warn("Backend API saveContent notice:", err.message));
+    } catch {
+      // ignore
+    }
+
     if (isSupabaseConfigured()) {
       supabaseDb.saveAIContent({
         id: content.id,
@@ -811,6 +953,12 @@ class StorageService {
   public deleteContent(id: string) {
     const all = JSON.parse(localStorage.getItem("teachease_content") || "[]").filter((c: AIContent) => c.id !== id);
     localStorage.setItem("teachease_content", JSON.stringify(all));
+
+    try {
+      apiService.deleteContent(id).catch(err => console.warn("Backend API deleteContent notice:", err.message));
+    } catch {
+      // ignore
+    }
   }
 }
 

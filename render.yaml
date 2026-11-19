@@ -1,0 +1,33 @@
+# ==============================================================================
+# TeachEase – Render Infrastructure as Code (Blueprint)
+# Provisions:
+# 1. Managed PostgreSQL Database (teachease-postgres)
+# 2. Node.js Web Service (teachease-backend)
+# ==============================================================================
+
+databases:
+  - name: teachease-postgres
+    databaseName: teachease
+    user: teachease_user
+    plan: free
+    ipAllowList: [] # Allow connections from all Render services and external clients
+
+services:
+  - type: web
+    name: teachease-backend
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: teachease-postgres
+          property: connectionString
+      - key: VITE_GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false

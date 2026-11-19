@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
+import { apiService } from "./apiService";
 
 /**
  * Resolves the centralized Gemini API key from environment variables.
@@ -110,14 +111,17 @@ export const executeGeminiPrompt = async (
   const apiKey = getGeminiApiKey();
   const { temperature = 0.7, maxOutputTokens, model = "gemini-3-flash-preview" } = options;
 
-  // Build model cascade list: gemini-3-flash-preview (fastest/proven) -> gemini-3.8-flash -> gemini-2.0-flash
-  const modelsToTry: string[] = [model, "gemini-3-flash-preview", "gemini-3.8-flash", "gemini-2.0-flash"].filter(
+  // Primary model is gemini-3-flash-preview (fastest, active on Google AI Studio) with gemini-3.8-flash fallback
+  const requestedModel = (!model || model.includes("2.5") || model.includes("2.0") || model.includes("1.5"))
+    ? "gemini-3-flash-preview"
+    : model;
+  const modelsToTry: string[] = [requestedModel, "gemini-3-flash-preview", "gemini-3.8-flash"].filter(
     (m, idx, arr) => arr.indexOf(m) === idx
   );
 
   let lastError: any = null;
 
-  // Tier 1 & 2: Direct browser client call if client API key is available
+  // Tier 1: Direct browser client call if client API key is available
   if (apiKey) {
     const client = new GoogleGenAI({ apiKey });
 
@@ -141,7 +145,7 @@ export const executeGeminiPrompt = async (
           lastError = err;
           const msg = (err?.message || String(err)).toLowerCase();
 
-          // If auth issue, break directly to proxy or raise
+          // If auth issue, break directly to backend proxy
           if (
             msg.includes("api_key_invalid") ||
             msg.includes("401") ||
@@ -149,7 +153,7 @@ export const executeGeminiPrompt = async (
             msg.includes("unauthorized") ||
             msg.includes("permission_denied")
           ) {
-            console.warn("[TeachEase AI] Direct API key authorization failed, checking server proxy...");
+            console.warn("[TeachEase AI] Direct API key authorization failed, trying backend proxy...");
             break;
           }
 
@@ -160,39 +164,21 @@ export const executeGeminiPrompt = async (
             continue;
           }
 
-          // Move to next model in fallback cascade
-          if (modelsToTry.length > 1) {
-            console.warn(`[TeachEase AI] Model ${currentModel} returned ${err.message}. Cascading to next fallback model...`);
-          }
           break;
         }
       }
     }
   }
 
-  // Tier 3: Server proxy fallback (/api/ai/generate) - resolves CORS, browser restrictions, and uses server-side .env
+  // Tier 2: Backend server proxy fallback via apiService (resolves CORS, browser restrictions, and uses server-side .env on Render/Vercel)
   try {
-    const response = await fetch("/api/ai/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        apiKey,
-        prompt,
-        model,
-        config: { temperature, maxOutputTokens }
-      })
+    const serverResult = await apiService.generateAI(prompt, requestedModel, {
+      temperature,
+      maxOutputTokens,
+      apiKey: apiKey || undefined,
     });
-
-    if (response.ok) {
-      const data = await response.json();
-      if (data && data.text) {
-        return data.text;
-      }
-    } else {
-      const errData = await response.json().catch(() => ({}));
-      if (errData?.error) {
-        lastError = new Error(errData.error);
-      }
+    if (serverResult && serverResult.text) {
+      return serverResult.text;
     }
   } catch (proxyErr: any) {
     if (!lastError) {
@@ -204,12 +190,14 @@ export const executeGeminiPrompt = async (
   const rawMsg = lastError?.message || String(lastError || "");
   const lowerMsg = rawMsg.toLowerCase();
 
-  if (!apiKey && !rawMsg) {
-    throw new Error("Gemini API Key is not configured. Please verify VITE_GEMINI_API_KEY in your .env file.");
+  if (!apiKey && (!rawMsg || lowerMsg.includes("failed to fetch") || lowerMsg.includes("not found"))) {
+    throw new Error(
+      "Gemini API Key is not configured. For localhost, verify VITE_GEMINI_API_KEY in your .env file. For Vercel or Render, add VITE_GEMINI_API_KEY in your project Environment Variables and redeploy."
+    );
   }
 
   if (lowerMsg.includes("api_key_invalid") || lowerMsg.includes("invalid api key") || lowerMsg.includes("401") || lowerMsg.includes("403")) {
-    throw new Error("Invalid Gemini API key or unauthorized. Please verify your VITE_GEMINI_API_KEY in .env.");
+    throw new Error("Invalid Gemini API key or unauthorized. Please verify your VITE_GEMINI_API_KEY in .env / platform settings.");
   }
 
   if (lowerMsg.includes("quota") || lowerMsg.includes("429") || lowerMsg.includes("resource_exhausted")) {

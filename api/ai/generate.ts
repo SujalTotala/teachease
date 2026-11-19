@@ -33,8 +33,8 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ error: "Prompt is required." });
     }
 
-    const requestedModel = (!model || model === "gemini-2.5-flash" || model === "gemini-1.5-flash") ? "gemini-3-flash-preview" : model;
-    const modelsToTry = [requestedModel, "gemini-3-flash-preview", "gemini-3.8-flash", "gemini-2.0-flash"].filter(
+    const requestedModel = (!model || model.includes("2.5") || model.includes("2.0") || model.includes("1.5")) ? "gemini-3-flash-preview" : model;
+    const modelsToTry = [requestedModel, "gemini-3-flash-preview", "gemini-3.8-flash"].filter(
       (m, idx, arr) => arr.indexOf(m) === idx
     );
 
